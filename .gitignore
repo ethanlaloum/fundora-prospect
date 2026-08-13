@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets
+.env
+
+# Sorties et cache runtime — jamais commitées : contiennent des donnees
+# personnelles reelles issues du BODACC (cf. CLAUDE.md, contrainte 4).
+out/
+.cache/
+explore/out/
+
+# Reglages Claude Code locaux (machine-specifiques)
+.claude/settings.local.json
+
+# OS / editeurs
+.DS_Store
+.idea/
+.vscode/
