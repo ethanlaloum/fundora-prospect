@@ -38,7 +38,11 @@ BASE = f"https://bodacc-datadila.opendatasoft.com/api/explore/v2.1/catalog/datas
 # Provence-Alpes-Cote d'Azur
 PACA_DEPTS = ["04", "05", "06", "13", "83", "84"]
 
-OUT_DIR = Path(__file__).parent / "out"
+# Les dumps bruts contiennent des donnees personnelles reelles (noms, adresses).
+# Ils sont ecrits HORS du depot : la protection ne doit pas dependre du
+# .gitignore, qui protege du commit mais pas d'une archive ou d'un partage
+# d'ecran du repertoire de travail.
+OUT_DIR = Path.home() / ".cache" / "fundora-prospect"
 
 
 def get(url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:

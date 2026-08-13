@@ -78,6 +78,54 @@ Croisement prix × type de cédant :
 `url_complete` fournit l'URL de publication par annonce : la contrainte de
 traçabilité est satisfiable nativement, sans reconstruction d'URL.
 
+### Les trois pièges de `origineFonds`
+
+Mesurés par `explore/probe_origine_fonds.py`. Ce sont les constats qui
+structurent le parser.
+
+**1. Le champ peut décrire une transaction ANTÉRIEURE à la publication.**
+
+599 annonces nationales citent un montant en francs, réparties de 2008 à
+**2026**. Le franc a cessé d'avoir cours en 2002 : une annonce publiée en 2026
+qui affiche un prix en francs décrit une transaction vieille de plus de 24 ans.
+Et 94,5 % de ces annonces ont un cédant renseigné — **le filtre cédant ne les
+attrape pas**, 43 % sont même des cédants personne morale.
+
+Conséquence : des montants en euros sont périmés de la même façon, et **ils
+sont invisibles**. Un montant en francs se trahit par sa devise ; une cession
+de 2015 republiée en 2026 en euros ne se trahit par rien.
+
+Seul garde disponible : `acte.descriptif` contient parfois « Acte en date du
+JJ/MM/AAAA », comparable à `dateparution`. Couverture **40,2 % seulement**.
+Écart mesuré sur la cible : médiane 33 j, p75 50 j, p95 145 j, max 1 184 j.
+1,45 % dépassent 1 an, 0,96 % dépassent 2 ans — la masse est au-delà de
+2 ans, ce qui signale deux populations distinctes. La cassure est là, d'où le
+seuil de 24 mois.
+
+**2. Achat et apport se distinguent lexicalement.**
+
+- achat au comptant → `acquis par achat au prix stipulé de X`
+- apport en nature → `acquis par apport au montant évalué à X`
+
+« prix stipulé » contre « montant évalué ». Le discriminant est fiable, pas
+heuristique. Voir la règle métier associée en Contrainte 6.
+
+**3. Les annonces multi-établissements sont négligeables : 0,1 %.**
+
+1 annonce sur 1 200. En dessous du seuil de décision de 5 % : on **marque
+l'annonce ambiguë et on passe**, sans implémenter la somme conditionnelle.
+
+La règle reste écrite ici si le volume changeait : un seul cédant et tous les
+établissements valorisés → somme ; plusieurs cédants sans mapping
+établissement → cédant → ambigu ; valorisation partielle → somme marquée
+partielle. Détail par établissement conservé dans le breakdown dans tous les
+cas.
+
+Aucune annonce ne contient plusieurs `prix stipulé` pour un même
+établissement. À vérifier en Phase 1 : 12,7 % des annonces ont zéro
+établissement, ce qui recoupe largement mais pas exactement les 13 % sans
+cédant — les deux filtres ne sont peut-être pas redondants.
+
 ## Contraintes non négociables
 
 Ces règles sont le cœur du projet, pas des détails. Un CIF régulé ne peut pas
@@ -110,11 +158,35 @@ exploiter une base constituée illégalement.
    et toutes les branches `adresse*` / `adresseSiegeSocial`.
 
    L'anonymisation doit donc traiter le texte libre, pas seulement des chemins
-   de champs. Elle est **vérifiée par un test**, pas par une relecture : un
-   test parcourt `tests/fixtures/` et échoue si un motif nom-propre ou adresse
-   y subsiste.
+   de champs.
+
+   **Elle est vérifiée par une LISTE BLANCHE, pas une liste noire.** Un test
+   qui cherche des noms connus laisse passer tous ceux qu'on n'a pas anticipés.
+   Les champs à texte libre des fixtures doivent matcher **exactement** un
+   gabarit synthétique connu ; tout contenu non reconnu fait échouer le test.
+   Ça impose au recorder de *remplacer intégralement* le texte libre plutôt que
+   d'y masquer des morceaux : on reconstruit la phrase, on ne la nettoie pas.
+
+   **La substitution se fait À LA CAPTURE.** Le recorder substitue en mémoire
+   avant d'écrire sur disque. Aucune donnée personnelle réelle ne doit jamais
+   exister dans le répertoire de travail — le `.gitignore` protège du commit,
+   pas d'une archive du dossier ni d'un partage d'écran. Les dumps
+   d'exploration vont dans `~/.cache/fundora-prospect/`, hors du dépôt.
+
+   **Un hook `.githooks/pre-commit` versionné lance ce test.** Activé par
+   `git config core.hooksPath .githooks`. `.git/hooks/` ne serait pas versionné
+   et disparaîtrait au premier clone. Le hook reste contournable par
+   `--no-verify` : c'est un filet, la garantie est le test dans `pytest`.
+   Git conserve l'historique — un nom commité une fois est exposé le jour où le
+   dépôt passe en public.
 5. **Scoring explicable.** Chaque score sort avec le détail de son calcul.
    Pas de boîte noire.
+6. **Un apport en nature n'est pas une cession.** Règle métier, pas commodité
+   de parsing : dans un apport, le cédant reçoit **des parts sociales, pas du
+   cash**. Il n'a aucune liquidité à placer et n'est donc pas un prospect
+   Fundora, quel que soit le montant affiché. Les apports sont rejetés avec un
+   motif explicite, jamais scorés à zéro — un zéro se noierait dans le flux,
+   un rejet motivé est auditable.
 
 ## Stack
 
@@ -156,16 +228,39 @@ Gate : je valide la structure des champs avec toi.
 
 ### Phase 1 — Client BODACC (J1 après-midi)
 `src/fundora_prospect/bodacc.py` : recherche d'annonces filtrée par type, date
-et département, avec whitelist de domaines appliquée au transport HTTP et
-cache disque.
+et département, avec whitelist de domaines appliquée **au transport HTTP** —
+un `httpx.BaseTransport` custom qui lève avant d'ouvrir la connexion, pas un
+`if` dans un helper qu'un futur appel pourrait contourner. Plus cache disque.
+
 Le vrai travail est le **parsing du prix de cession**, en texte semi-structuré
-dans `listeetablissements.etablissement.origineFonds`. Traite les cas : prix
-absent, devise (euros / EUR / francs), formats variés, "apport partiel",
-montants aberrants.
-Extraction du cédant depuis `listeprecedentproprietaire`, avec son
-`typePersonne`, et exclusion des annonces sans cédant.
-Gate : tests unitaires sur fixtures + 1 test réseau. Taux de parsing du prix
-mesuré et affiché sur un échantillon réel — référence à battre : 86 %.
+dans `listeetablissements.etablissement.origineFonds`.
+
+Le parser répond à une seule question : **« ce montant décrit-il bien la
+transaction annoncée ? »** C'est de la qualité de donnée. Trois gardes, par
+ordre de fiabilité :
+
+| Garde | Discriminant | Couverture |
+|---|---|---|
+| Devise | `francs`, `FRF`, `FRANCS FRANCAIS` → rejet | totale |
+| Nature | `montant évalué` → apport, rejet (contrainte 6) | totale |
+| Fraîcheur de l'acte | écart acte → parution **> 24 mois** → rejet | 40 % |
+
+Le seuil de 24 mois est un seuil de **qualité de donnée, pas de pertinence
+commerciale**. Un acte de 20 mois est une donnée valide mais vieille : c'est au
+scoring de la déclasser, pas au parser de la supprimer. Sinon, élargir la
+fenêtre métier obligerait à modifier `prix.py`.
+
+Sortie : `PrixCession(montant, devise, methode, texte_source, qualification,
+confiance)`. `confiance` porte l'écart acte → parution, ou le fait qu'il soit
+indatable.
+
+Extraction du cédant depuis `listeprecedentproprietaire` (tantôt objet, tantôt
+liste — indivision, 1,6 %), avec son `typePersonne` et son SIREN normalisé
+(l'API le rend espacé : `325 662 559`). Exclusion des annonces sans cédant.
+
+Gate : tests unitaires sur fixtures + 1 test réseau. Taux de parsing mesuré et
+affiché **par segment**, et taux de rejet ventilé par motif. Référence à battre
+sur le sous-ensemble cédant personne morale : **99,8 %**.
 
 ### Phase 2 — Modèle et scoring (J2 matin)
 `models.py` : `LiquidityEvent`, `Lead`, `ScoreBreakdown` (pydantic).
@@ -174,6 +269,17 @@ mesuré et affiché sur un échantillon réel — référence à battre : 86 %.
 - fraîcheur : fenêtre 0–18 mois, décroissance au-delà
 - secteur d'activité
 - département
+
+**La fraîcheur se calcule depuis la date de l'ACTE, pas depuis la parution.**
+L'écart médian est de 33 jours mais p95 = 145 jours, soit près de 5 mois
+consommés sur une fenêtre de 18 : compter depuis la parution surestimerait
+systématiquement la fraîcheur. Repli sur `dateparution` quand l'acte n'est pas
+datable (60 % des cas), avec l'écart porté par le champ `confiance` du
+`PrixCession` pour que le breakdown dise laquelle des deux dates a servi.
+
+Rappel du découpage : le parser tranche la validité de la donnée (seuil dur à
+24 mois), le scoring tranche la pertinence commerciale (fenêtre 18 mois,
+décroissance). Ne pas mélanger les deux.
 Sortie : score 0–100 + détail par critère.
 Gate : tests paramétrés sur les cas limites (prix nul, date future, secteur
 inconnu, montant extrême).
