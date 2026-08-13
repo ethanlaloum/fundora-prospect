@@ -1,0 +1,30 @@
+#!/bin/sh
+# Garde-fou RGPD avant chaque commit (contrainte 4).
+#
+# Git conserve l'historique : un nom commite une fois reste expose le jour ou
+# le depot passe en public, meme supprime dans un commit ulterieur. La seule
+# protection utile intervient AVANT l'ecriture de l'objet.
+#
+# Ce hook est versionne dans `.githooks/` et non dans `.git/hooks/`, qui n'est
+# pas suivi et disparaitrait au premier clone. Activation :
+#
+#     git config core.hooksPath .githooks
+#
+# Il reste contournable par `git commit --no-verify` : c'est un filet, pas une
+# garantie. La garantie est le meme test dans `pytest`.
+
+set -e
+
+PYTHON=".venv/bin/python"
+[ -x "$PYTHON" ] || PYTHON="python3"
+
+echo "pre-commit : verification de l'anonymisation des fixtures..."
+
+if ! "$PYTHON" -m pytest tests/test_anonymisation.py -q --no-header; then
+    echo
+    echo "COMMIT REFUSE : les fixtures ne respectent pas la liste blanche."
+    echo "Regenere-les avec :  $PYTHON tools/record_fixtures.py"
+    exit 1
+fi
+
+echo "pre-commit : OK"

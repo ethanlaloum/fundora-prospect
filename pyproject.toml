@@ -23,6 +23,9 @@ packages = ["src/fundora_prospect"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `src` pour le package, `.` pour `tools/` (recorder de fixtures et vocabulaire
+# synthetique partages avec les tests).
+pythonpath = ["src", "."]
 # Les tests reseau sont exclus par defaut. Pour les lancer :
 #   pytest -m network
 addopts = "-m 'not network'"
@@ -36,3 +39,10 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Le lexique est un bloc de texte : plus lisible et plus facile a etendre
+# qu'une liste de litteraux.
+"tools/vocabulaire.py" = ["SIM905"]
+# Le recorder doit ajuster sys.path avant d'importer le package.
+"tools/record_fixtures.py" = ["E402"]
