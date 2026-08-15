@@ -192,7 +192,7 @@ modèle.
 
 **Décision.** C'est une **grille de pondération à dire d'expert**, et le code
 le dit : `GrillePonderation`, `evaluer`, `ContributionCritere`. Aucun `model`,
-`predict` ou `train`. Les poids vivent dans `config/ponderation.toml`, chargé
+`predict` ou `train`. Les poids vivent dans `src/fundora_prospect/config/ponderation.toml`, chargé
 au runtime — les recalibrer ne touche aucun `.py`.
 
 **Pourquoi l'alternative est écartée.** Aucune donnée de conversion n'existe :
@@ -258,16 +258,60 @@ l'enrichissement.
   models.py        LiquidityEvent — le fait, avec sa provenance
         │
         ▼
-  scoring.py       grille de pondération ← config/ponderation.toml
+  scoring.py       grille de pondération ← config/ponderation.toml (dans le paquet)
         │          → non retenu ou aberrant : hors classement, avec motif
         ▼
   Lead + ScoreBreakdown
+        │
+        ▼
+  mcp_server.py    serveur MCP en stdio — le point d'entree du plugin
+                   search_liquidity_events / enrich_company / score_lead
 ```
 
 Le découpage qui compte : **`prix.py` tranche la qualité de la donnée,
 `scoring.py` tranche la pertinence commerciale.** D'où deux seuils distincts —
 24 mois dans le parser, décroissance continue dans la grille. Élargir la
 fenêtre commerciale ne doit jamais obliger à modifier le parser.
+
+---
+
+## Le serveur MCP
+
+Le pipeline est expose comme serveur MCP en stdio, ce qui permet de l'interroger
+en langage naturel depuis Claude Code :
+
+> « trouve-moi les cessions de plus de 300 k€ dans le 06 sur 6 mois »
+
+Trois outils :
+
+| Outil | Role |
+|---|---|
+| `search_liquidity_events` | **le pipeline complet** — recherche, prix, cédant, statut, score, tri |
+| `enrich_company` | statut et APE d'un SIREN, pour inspecter un cas isolé |
+| `score_lead` | applique la grille à une cession décrite à la main |
+
+**`search_liquidity_events` fait tout le pipeline, délibérément.** Trois outils
+strictement granulaires obligeraient le modèle à appeler la recherche, puis
+l'enrichissement pour chaque SIREN, puis le scoring pour chaque événement : des
+dizaines d'allers-retours, lents et impossibles à démontrer en direct. Un appel
+suffit ; les deux autres outils restent là pour inspecter un cas précis.
+
+**La réponse porte les motifs de refus, pas seulement les leads.** Sortie réelle
+sur le 06, six mois, plus de 300 k€ :
+
+```
+458 annonces examinees, 5 classables, 333 sous le montant minimum,
+6 apport, 2 absent, 2 acte trop ancien.
+```
+
+L'auditabilité construite dans le parser et la grille reste visible jusque dans
+le transport MCP — sinon elle n'existerait que dans les tests.
+
+**Un détail de conception qui compte.** L'enrichissement coûte un appel API par
+lead, donc seul le haut du panier est enrichi. Ce pré-classement se fait sur le
+**score provisoire**, pas sur le montant : trier sur le montant réintroduirait
+exactement le biais que la grille a corrigé, et une cession fraîche mais modeste
+ne serait jamais enrichie, donc jamais rendue. Un test le vérifie.
 
 ---
 
@@ -327,7 +371,7 @@ Les poids — 55 pour le montant, 35 pour la fraîcheur, 10 pour le secteur, 0
 pour le département — sont des **hypothèses commerciales**. Aucune donnée de
 conversion n'existe pour les valider.
 
-Ils sont recalibrables sans toucher au code, et `config/ponderation.toml` porte
+Ils sont recalibrables sans toucher au code, et `src/fundora_prospect/config/ponderation.toml` porte
 la date de calibration et le motif de chaque pondération. Mais recalibrable
 n'est pas calibré.
 
@@ -451,7 +495,7 @@ il contient des réponses d'API avec des données personnelles réelles, et le
 
 | Commande | Ce qu'elle produit |
 |---|---|
-| `.venv/bin/python -m pytest -q` | 302 tests unitaires, sur fixtures figées, sans réseau |
+| `.venv/bin/python -m pytest -q` | 334 tests unitaires, sur fixtures figées, sans réseau |
 | `.venv/bin/python -m pytest -m network -q -s` | volume annuel, taux de parsing par segment, corrélation de rang |
 | `.venv/bin/python explore/dump_bodacc.py` | structure de la donnée, taux de présence du prix |
 | `.venv/bin/python explore/probe_origine_fonds.py` | les montants en francs, les annonces multi-établissements |
@@ -482,8 +526,8 @@ Trois réserves honnêtes :
 
 ## Suite prévue
 
-Exposition en serveur MCP, puis packaging en plugin Claude Code avec un hook
-`PreToolUse` bloquant les appels hors whitelist — un second verrou, au niveau
-de l'agent, complémentaire de celui posé au transport HTTP.
+Packaging en plugin Claude Code, avec un hook `PreToolUse` bloquant les appels
+hors whitelist — un second verrou, au niveau de l'agent, complémentaire de
+celui posé au transport HTTP.
 
-Rien de tout cela n'existe à ce jour. Ce README ne décrit que ce qui tourne.
+Le plugin n'existe pas à ce jour. Ce README ne décrit que ce qui tourne.

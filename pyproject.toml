@@ -6,7 +6,13 @@ requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27",
     "pydantic>=2.7",
+    "mcp>=2.0",
 ]
+
+# Point d'entree du serveur MCP, reference par `.mcp.json`. Un script installe
+# est plus robuste qu'un `python -m` : il ne depend ni du cwd ni du PYTHONPATH.
+[project.scripts]
+fundora-prospect-mcp = "fundora_prospect.mcp_server:main"
 
 [project.optional-dependencies]
 dev = [
@@ -21,12 +27,16 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/fundora_prospect"]
 
-# `config/ponderation.toml` reste a la RACINE du depot — c'est la que le
-# lecteur le cherche, et c'est ce que la documentation designe. Mais il doit
-# aussi voyager dans la roue, sinon une installation sans `-e` n'a aucune
-# grille a charger : c'est le cas du serveur MCP et du plugin empaquete.
-[tool.hatch.build.targets.wheel.force-include]
-"config/ponderation.toml" = "fundora_prospect/config/ponderation.toml"
+# `ponderation.toml` vit DANS le paquet, a `src/fundora_prospect/config/`.
+#
+# Il etait auparavant a la racine et injecte par `force-include`. C'etait un
+# piege : en installation editable, hatchling materialisait un dossier
+# `fundora_prospect/config/` dans site-packages, qui MASQUAIT le paquet
+# editable et cassait tout import hors pytest. Une seule source, un seul
+# emplacement, aucun masquage possible.
+#
+# Le fichier reste un TOML lisible et modifiable sans toucher au code, et
+# `FUNDORA_PONDERATION` permet d'en designer un autre.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
