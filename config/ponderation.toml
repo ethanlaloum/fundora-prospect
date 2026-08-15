@@ -1,0 +1,95 @@
+# Grille de ponderation — A DIRE D'EXPERT
+#
+# Ces poids sont des HYPOTHESES COMMERCIALES, pas des coefficients appris.
+# Aucune donnee de conversion n'existe pour les calibrer : on ne sait pas
+# quels leads se transforment. Presenter cette grille comme un modele
+# laisserait croire a une validation empirique qui n'a pas eu lieu.
+#
+# Ce fichier est charge au runtime, jamais importe. Recalibrer la grille ne
+# doit toucher aucun fichier .py.
+
+version = 1
+date_calibration = "2026-08-15"
+methode = "a dire d'expert — aucune donnee de conversion disponible"
+
+# La somme des poids fait 100 : le score est directement lisible sur 0-100.
+
+[montant]
+poids = 55
+motif = """
+Critere dominant : la capacite a engager un ticket de 10 k EUR depend d'abord
+du produit de cession encaisse.
+"""
+
+# Normalisation LOGARITHMIQUE. Le critere serait sinon lineaire sur une
+# distribution qui ne l'est pas (mediane 110 k, max 6,2 M). Le log preserve
+# l'ordre et rend lisible l'ecart entre 200 et 400 k EUR, la ou vit le volume.
+# Sens metier : 200 -> 400 k change la capacite d'investissement, 5 -> 6 M non.
+echelle = "log"
+
+# En dessous, contribution nulle : un fonds cede sous ce prix ne finance pas
+# un ticket de private equity.
+plancher_eur = 10_000
+
+# p99 de la distribution mesuree. CE N'EST PAS UNE SATURATION METIER : ce
+# plafond borne une valeur aberrante mal parsee, rien d'autre. Un plafond bas
+# rendrait 6,2 M et 1 M equivalents alors que le premier est un meilleur
+# prospect — ce serait detruire de l'information.
+plafond_eur = 1_580_000
+
+[fraicheur]
+poids = 35
+motif = """
+Le cash de cession se place vite. Au-dela de la fenetre, il a ete reinvesti,
+consomme ou immobilise ailleurs.
+"""
+
+# Contribution pleine jusqu'a 18 mois, puis decroissance lineaire jusqu'a zero
+# a 36 mois. La fenetre est calculee depuis la date d'ACTE quand elle est
+# lisible, depuis la parution sinon — l'ecart median est de 33 jours mais p95
+# atteint 145 jours, soit pres de 5 mois consommes sur une fenetre de 18.
+#
+# A ne pas confondre avec le seuil de 24 mois du parser : celui-ci tranche la
+# QUALITE DE LA DONNEE, celui-la tranche la PERTINENCE COMMERCIALE.
+fenetre_pleine_jours = 548
+fenetre_nulle_jours = 1096
+
+[secteur]
+poids = 10
+motif = """
+Certains secteurs cedent a des profils plus proches de l'ICP Fundora.
+INDISPONIBLE avant la Phase 3 : BODACC ne porte aucun code APE ou NAF, et le
+champ `activite` est de la prose libre (264 valeurs distinctes sur 271).
+Le critere rend une contribution neutre en attendant l'enrichissement, avec
+son motif affiche dans le breakdown — un critere silencieusement absent serait
+un trou dans l'explicabilite.
+"""
+
+# Codes APE prioritaires, a remplir en Phase 3.
+codes_prioritaires = []
+
+[departement]
+poids = 0
+motif = """
+POIDS NUL DELIBEREMENT. Le perimetre PACA est homogene : rien ne justifie de
+hierarchiser les six departements entre eux, et fabriquer un ordre 13 > 06 > 83
+serait inventer un signal. Le critere reste declare, pret a servir si le
+perimetre s'elargit a d'autres regions.
+"""
+
+departements_prioritaires = []
+
+[controle]
+# Correlation de rang entre le classement de la grille et le classement par
+# montant seul, mesuree sur les seuls evenements RETENUS.
+#
+# Ce seuil DECLENCHE UN AVERTISSEMENT, pas un echec. Si la correlation reste
+# elevee apres le passage en log, on ne retouche pas les poids pour faire
+# passer un test : on documente que sur une population filtree a plus de
+# 200 k EUR, le montant domine et les autres criteres departagent a montant
+# comparable. C'est une conclusion valide.
+correlation_montant_avertissement = 0.90
+
+# Ce qui doit VRAIMENT etre garanti : a montant egal, les autres criteres
+# separent deux evenements. Sinon ils sont du code mort.
+ecart_minimal_a_montant_egal = 1.0

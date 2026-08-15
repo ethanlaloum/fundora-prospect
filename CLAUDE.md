@@ -313,11 +313,66 @@ Les poids vivent dans un **fichier de configuration séparé**, rechargeable san
 toucher au code : ils seront recalibrés dès qu'un retour commercial existera,
 et ça ne doit pas être une modification de `scoring.py`.
 
-**Test de corrélation de rang obligatoire.** Sur une population déjà filtrée à
-plus de 200 k€, le montant risque d'écraser les autres critères. Un test
-compare le classement produit par la grille complète au classement par montant
-seul (corrélation de Spearman). **Au-delà de 0,90, la grille est un tri par
-prix déguisé** et les pondérations sont à revoir — le test échoue.
+**Le montant est normalisé en échelle LOGARITHMIQUE.** Le critère serait sinon
+linéaire sur une distribution qui ne l'est pas — médiane 110 k€, max 6,2 M€.
+Le log préserve l'ordre, empêche le haut de la distribution d'écraser le reste,
+et rend de nouveau lisible l'écart entre 200 et 400 k€, là où vit le volume.
+C'est aussi le sens métier : passer de 200 à 400 k€ change la capacité
+d'investissement, passer de 5 à 6 M€ non.
+
+**Le plafond n'est pas une saturation métier.** Il est placé très haut (p99) et
+sert uniquement à **borner une valeur aberrante mal parsée**. Un plafond bas
+rendrait 6,2 M€ et 1 M€ équivalents alors que le premier est un meilleur
+prospect : ce serait détruire de l'information, pas corriger une échelle.
+
+**Les montants aberrants ne sont pas ramenés au plafond.** Une donnée dont on
+ignore si elle est juste ne doit pas atterrir en tête du classement. Même
+traitement que les événements non retenus : hors classement, avec motif.
+
+**Test de corrélation de rang.** Sur une population déjà filtrée à plus de
+200 k€, le montant peut dominer. Un test mesure la corrélation de Spearman
+entre le classement de la grille complète et le classement par montant seul,
+**sur les seuls événements retenus** — inclure les refus polluerait les rangs.
+
+Si la corrélation reste élevée après le passage en log, **on ne retouche pas
+les poids pour faire passer un seuil**. On documente le résultat tel quel : sur
+une population filtrée à plus de 200 k€, le montant domine et les autres
+critères départagent à montant comparable. C'est une conclusion valide, pas un
+échec. Le test mesure et affiche ; ce qu'il garantit, c'est que les autres
+critères **discriminent réellement à montant égal** — s'ils ne le font pas, ils
+sont du code mort et le test échoue.
+
+#### Résultat mesuré : corrélation = 0,998
+
+Mesuré sur 518 annonces PACA réparties sur 12 mois, événements retenus
+uniquement. Le classement de la grille est, à ce stade, **un tri par montant**.
+
+La cause n'est pas la pondération, c'est la **forme du critère de fraîcheur**.
+La spécification dit « fenêtre 0–18 mois, décroissance au-delà » : sur cette
+fenêtre, la fraîcheur vaut 1,0 pour tout le monde. C'est un plateau. Deux
+cessions de même montant à 3 et à 15 mois obtiennent exactement le même score.
+Or une recherche porte normalement sur les 12 derniers mois — donc **toute la
+population tombe dans le plateau**.
+
+Les trois autres critères sont alors inertes simultanément :
+
+| Critère | État | Cause |
+|---|---|---|
+| Fraîcheur | plateau à 1,0 | fenêtre pleine ≥ fenêtre de recherche |
+| Secteur | neutre | pas de code APE avant la Phase 3 |
+| Département | poids 0 | choix délibéré, périmètre PACA homogène |
+
+Le score est donc une fonction monotone du seul montant, et 0,998 est le
+résultat attendu, pas une anomalie. Les 0,002 manquants viennent des quelques
+actes assez anciens pour sortir du plateau.
+
+**Ce n'est pas corrigé en Phase 2.** La correction naturelle — faire décroître
+la fraîcheur dès le premier jour au lieu d'un plateau — change la
+spécification du critère et se décide, elle ne se glisse pas dans une
+implémentation. La Phase 3 rend par ailleurs le secteur opérant, ce qui modifie
+la donne. La limite est inscrite dans un test
+(`test_la_fenetre_pleine_est_un_PLATEAU_et_ne_discrimine_pas`) pour qu'elle
+reste visible au lieu d'être redécouverte.
 
 `models.py` : `LiquidityEvent`, `Lead`, `ScoreBreakdown` (pydantic).
 `scoring.py` : fonction pure et déterministe. Critères :

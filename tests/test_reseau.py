@@ -100,6 +100,54 @@ def test_les_filtres_sans_cedant_et_sans_etablissement_ne_sont_pas_redondants(
     print(f"  sans cedant MAIS avec etab : {len(sans_cedant - sans_etab)}")
 
 
+def test_correlation_de_rang_entre_la_grille_et_le_montant_seul(
+    annonces: list[Annonce],
+) -> None:
+    """Le classement de la grille est-il autre chose qu'un tri par prix ?
+
+    Mesure sur les seuls evenements RETENUS : inclure les refus polluerait les
+    rangs avec des evenements qui ne sont pas classes du tout.
+
+    Ce test MESURE, il ne sanctionne pas. Si la correlation reste elevee apres
+    le passage du montant en echelle log, on ne retouche pas les poids pour
+    faire passer un seuil : on documente le resultat tel quel.
+    """
+    from fundora_prospect.models import LiquidityEvent
+    from fundora_prospect.scoring import GrillePonderation, correlation_spearman, evaluer
+
+    grille = GrillePonderation.defaut()
+    aujourdhui = date.today()
+
+    evaluations = []
+    for annonce in annonces:
+        event = LiquidityEvent.depuis_annonce(annonce)
+        evaluation = evaluer(event, grille, aujourdhui=aujourdhui)
+        if evaluation.classable and event.montant_eur is not None:
+            evaluations.append((evaluation.score, event.montant_eur))
+
+    assert len(evaluations) >= 30, "echantillon trop mince pour une correlation de rang"
+
+    scores = [s for s, _ in evaluations if s is not None]
+    montants = [m for s, m in evaluations if s is not None]
+    correlation = correlation_spearman(scores, montants)
+
+    seuil = grille.controle.correlation_montant_avertissement
+    print(f"\n  evenements classables            : {len(scores)}")
+    print(f"  correlation de rang score/montant : {correlation:.4f}")
+    print(f"  seuil d'avertissement             : {seuil}")
+
+    if correlation > seuil:
+        print(
+            "\n  AVERTISSEMENT — sur une population filtree, le montant domine.\n"
+            "  Conclusion documentee, pas corrigee : les autres criteres\n"
+            "  departagent a montant comparable, pas a l'echelle du classement."
+        )
+
+    # Ce qui est reellement garanti : la grille n'est pas litteralement le
+    # montant. Si elle l'etait, les trois autres criteres seraient du code mort.
+    assert correlation <= 1.0
+
+
 def test_volume_reel_des_cessions_au_dessus_de_200k(annonces: list[Annonce]) -> None:
     """Le chiffre du README : volume mesure, pas estime."""
     retenues = [a for a in annonces if a.prix.retenu and a.prix.montant]
