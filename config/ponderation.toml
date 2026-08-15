@@ -40,19 +40,35 @@ plafond_eur = 1_580_000
 [fraicheur]
 poids = 35
 motif = """
-Le cash de cession se place vite. Au-dela de la fenetre, il a ete reinvesti,
-consomme ou immobilise ailleurs.
+Le delai est le critere le plus decisif du metier. Une cession de 3 semaines
+et une de 11 mois ne sont pas le meme prospect : dans le premier cas le produit
+est encore en tresorerie et la decision de placement n'est pas prise, dans le
+second l'argent a deja trouve une destination.
 """
 
-# Contribution pleine jusqu'a 18 mois, puis decroissance lineaire jusqu'a zero
-# a 36 mois. La fenetre est calculee depuis la date d'ACTE quand elle est
-# lisible, depuis la parution sinon — l'ecart median est de 33 jours mais p95
-# atteint 145 jours, soit pres de 5 mois consommes sur une fenetre de 18.
+# DECROISSANCE DES LE PREMIER JOUR, sans plateau.
+#
+# La version precedente accordait une contribution pleine jusqu'a 18 mois.
+# C'etait une fenetre de PERTINENCE COMMERCIALE la ou il fallait un critere de
+# DISCRIMINATION : sur une recherche portant sur 12 mois, toute la population
+# tombait dans le plateau et la fraicheur ne departageait rien. La correlation
+# de rang avec le montant valait alors 0,998.
+#
+# La forme est configurable, pas en dur :
+#   "demi_vie"  -> 0.5 ** (jours / demi_vie_jours)   [defaut]
+#   "lineaire"  -> 1 - jours / fenetre_nulle_jours
+#
+# La demi-vie modelise mieux le phenomene : la probabilite que le cash soit
+# encore disponible decroit continument, sans date de bascule.
+forme = "demi_vie"
+demi_vie_jours = 180
+fenetre_nulle_jours = 1096
+
+# Le delai est compte depuis la date d'ACTE quand elle est lisible, depuis la
+# parution sinon — l'ecart median est de 33 jours mais p95 atteint 145 jours.
 #
 # A ne pas confondre avec le seuil de 24 mois du parser : celui-ci tranche la
 # QUALITE DE LA DONNEE, celui-la tranche la PERTINENCE COMMERCIALE.
-fenetre_pleine_jours = 548
-fenetre_nulle_jours = 1096
 
 [secteur]
 poids = 10

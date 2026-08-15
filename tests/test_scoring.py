@@ -104,20 +104,57 @@ def test_montant_absent_donne_none(grille: GrillePonderation) -> None:
     ("jours", "attendu"),
     [
         (0, 1.0),
-        (200, 1.0),
-        (548, 1.0),  # 18 mois : fin de la fenetre pleine
-        (1096, 0.0),  # 36 mois : contribution nulle
-        (2000, 0.0),
         (-10, 1.0),  # date future : borne, pas d'erreur
     ],
 )
-def test_fraicheur(grille: GrillePonderation, jours: int, attendu: float) -> None:
+def test_fraicheur_bornes_hautes(grille: GrillePonderation, jours: int, attendu: float) -> None:
     assert normaliser_fraicheur(jours, grille.fraicheur) == pytest.approx(attendu)
 
 
-def test_fraicheur_decroit_entre_les_deux_bornes(grille: GrillePonderation) -> None:
-    milieu = (grille.fraicheur.fenetre_pleine_jours + grille.fraicheur.fenetre_nulle_jours) // 2
-    assert normaliser_fraicheur(milieu, grille.fraicheur) == pytest.approx(0.5, abs=0.01)
+def test_la_demi_vie_divise_par_deux_a_chaque_periode(grille: GrillePonderation) -> None:
+    demi_vie = grille.fraicheur.demi_vie_jours
+    assert normaliser_fraicheur(demi_vie, grille.fraicheur) == pytest.approx(0.5)
+    assert normaliser_fraicheur(2 * demi_vie, grille.fraicheur) == pytest.approx(0.25)
+
+
+def test_la_fraicheur_decroit_DES_LE_PREMIER_JOUR(grille: GrillePonderation) -> None:
+    """Correction de la Phase 2 : la version initiale accordait une
+    contribution pleine jusqu'a 18 mois. C'etait une fenetre de pertinence
+    commerciale la ou il faut un critere de discrimination — toute la
+    population d'une recherche sur 12 mois tombait dans le plateau.
+
+    Sens metier : une cession de 3 semaines et une de 11 mois ne sont pas le
+    meme prospect. Dans le premier cas le produit est encore en tresorerie et
+    la decision de placement n'est pas prise ; dans le second l'argent a deja
+    trouve une destination.
+    """
+    trois_semaines = normaliser_fraicheur(21, grille.fraicheur)
+    onze_mois = normaliser_fraicheur(335, grille.fraicheur)
+    assert trois_semaines > onze_mois
+    assert trois_semaines - onze_mois > 0.3, "la decroissance doit etre franche sur 12 mois"
+
+
+def test_la_fraicheur_est_strictement_decroissante(grille: GrillePonderation) -> None:
+    valeurs = [normaliser_fraicheur(j, grille.fraicheur) for j in (1, 30, 90, 180, 365, 548)]
+    assert valeurs == sorted(valeurs, reverse=True)
+    assert len(set(valeurs)) == len(valeurs), "aucun palier : chaque delai a sa valeur"
+
+
+def test_la_forme_de_decroissance_est_configurable(grille: GrillePonderation) -> None:
+    """Lineaire ou demi-vie : la forme vient du fichier, pas du code."""
+    from dataclasses import replace
+
+    lineaire = replace(grille.fraicheur, forme="lineaire")
+    assert normaliser_fraicheur(548, lineaire) == pytest.approx(1 - 548 / 1096, abs=0.01)
+    assert normaliser_fraicheur(1096, lineaire) == pytest.approx(0.0)
+    assert normaliser_fraicheur(2000, lineaire) == 0.0
+
+
+def test_forme_inconnue_leve(grille: GrillePonderation) -> None:
+    from dataclasses import replace
+
+    with pytest.raises(ValueError, match="forme de decroissance inconnue"):
+        normaliser_fraicheur(100, replace(grille.fraicheur, forme="exponentielle_inversee"))
 
 
 def test_la_fraicheur_part_de_l_acte_quand_il_est_datable(grille: GrillePonderation) -> None:
@@ -273,21 +310,12 @@ def test_les_autres_criteres_departagent_a_montant_egal(grille: GrillePonderatio
     )
 
 
-def test_la_fenetre_pleine_est_un_PLATEAU_et_ne_discrimine_pas(
+def test_deux_cessions_recentes_de_meme_montant_sont_departagees(
     grille: GrillePonderation,
 ) -> None:
-    """Limite structurelle, documentee ici plutot que decouverte en production.
-
-    La specification dit « fenetre 0-18 mois, decroissance au-dela ». Sur cette
-    fenetre, la fraicheur vaut 1,0 pour tout le monde : deux cessions de meme
-    montant a 3 et 15 mois obtiennent exactement le meme score.
-
-    Consequence directe : sur une recherche portant sur les 12 derniers mois —
-    le cas d'usage normal — la fraicheur ne departage RIEN, le secteur est
-    neutre jusqu'a la Phase 3 et le departement pese zero. Le classement est
-    alors une fonction monotone du seul montant, et la correlation de rang vaut
-    mecaniquement 1,0.
-    """
+    """Le cas qui echouait avec le plateau : 3 mois contre 15 mois, meme
+    montant. Les deux tombaient dans la fenetre pleine et obtenaient le meme
+    score. C'est le coeur de la correction."""
     trois_mois = evaluer(
         evenement(300_000, date_acte=date(2026, 5, 15), identifiant="recent"),
         grille,
@@ -298,7 +326,29 @@ def test_la_fenetre_pleine_est_un_PLATEAU_et_ne_discrimine_pas(
         grille,
         aujourdhui=AUJOURDHUI,
     )
-    assert trois_mois.score == quinze_mois.score
+    assert trois_mois.score is not None and quinze_mois.score is not None
+    assert trois_mois.score > quinze_mois.score
+    assert trois_mois.score - quinze_mois.score > 10.0
+
+
+def test_la_fraicheur_peut_renverser_un_ecart_de_montant(
+    grille: GrillePonderation,
+) -> None:
+    """Preuve que la grille n'est plus un tri par montant : un montant plus
+    faible mais tres frais doit pouvoir passer devant un montant plus eleve
+    mais ancien."""
+    modeste_et_frais = evaluer(
+        evenement(250_000, date_acte=date(2026, 8, 1), identifiant="frais"),
+        grille,
+        aujourdhui=AUJOURDHUI,
+    )
+    eleve_et_ancien = evaluer(
+        evenement(600_000, date_acte=date(2024, 10, 1), identifiant="ancien"),
+        grille,
+        aujourdhui=AUJOURDHUI,
+    )
+    assert modeste_et_frais.score is not None and eleve_et_ancien.score is not None
+    assert modeste_et_frais.score > eleve_et_ancien.score
 
 
 # --- Configuration -----------------------------------------------------------
@@ -316,7 +366,9 @@ def test_les_poids_somment_a_cent(grille: GrillePonderation) -> None:
 
 def test_les_bornes_de_la_config_sont_coherentes(grille: GrillePonderation) -> None:
     assert grille.montant.plancher_eur < grille.montant.plafond_eur
-    assert grille.fraicheur.fenetre_pleine_jours < grille.fraicheur.fenetre_nulle_jours
+    assert grille.fraicheur.forme in {"demi_vie", "lineaire"}
+    assert grille.fraicheur.demi_vie_jours > 0
+    assert grille.fraicheur.fenetre_nulle_jours > 0
 
 
 def test_la_grille_se_declare_non_calibree(grille: GrillePonderation) -> None:

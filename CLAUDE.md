@@ -342,7 +342,34 @@ critères départagent à montant comparable. C'est une conclusion valide, pas u
 critères **discriminent réellement à montant égal** — s'ils ne le font pas, ils
 sont du code mort et le test échoue.
 
-#### Résultat mesuré : corrélation = 0,998
+#### Résultat : 0,998 → 0,790 après correction de la fraîcheur
+
+| Forme de la fraîcheur | Corrélation score / montant |
+|---|---|
+| Plateau 0–18 mois *(version initiale)* | **0,9980** |
+| Décroissance dès J1, demi-vie 180 j | **0,7895** |
+| | **Δ = −0,2085** |
+
+Mesuré sur 505 événements classables, PACA, 12 mois. **19,2 % des paires sont
+désormais classées différemment d'un tri par montant seul** — la grille produit
+un classement propre, plus une réécriture du prix.
+
+La correction : **la fraîcheur décroît dès le premier jour, sans plateau.**
+La version initiale accordait une contribution pleine jusqu'à 18 mois — c'était
+une *fenêtre de pertinence commerciale* là où il fallait un *critère de
+discrimination*. Sur une recherche portant sur 12 mois, toute la population
+tombait dans le plateau.
+
+Raison métier : une cession de trois semaines et une de onze mois ne sont pas
+le même prospect. Dans le premier cas le produit est encore en trésorerie et la
+décision de placement n'est pas prise ; dans le second l'argent a déjà trouvé
+une destination. **Le délai est le critère le plus décisif du métier.**
+
+La forme de la décroissance est en configuration (`demi_vie` ou `lineaire`),
+pas en dur. La demi-vie modélise mieux le phénomène : la probabilité que le
+cash soit encore disponible décroît continûment, sans date de bascule.
+
+#### Analyse de la version initiale, conservée pour mémoire
 
 Mesuré sur 518 annonces PACA réparties sur 12 mois, événements retenus
 uniquement. Le classement de la grille est, à ce stade, **un tri par montant**.
@@ -366,13 +393,9 @@ Le score est donc une fonction monotone du seul montant, et 0,998 est le
 résultat attendu, pas une anomalie. Les 0,002 manquants viennent des quelques
 actes assez anciens pour sortir du plateau.
 
-**Ce n'est pas corrigé en Phase 2.** La correction naturelle — faire décroître
-la fraîcheur dès le premier jour au lieu d'un plateau — change la
-spécification du critère et se décide, elle ne se glisse pas dans une
-implémentation. La Phase 3 rend par ailleurs le secteur opérant, ce qui modifie
-la donne. La limite est inscrite dans un test
-(`test_la_fenetre_pleine_est_un_PLATEAU_et_ne_discrimine_pas`) pour qu'elle
-reste visible au lieu d'être redécouverte.
+**Corrigé** — voir ci-dessus. La leçon à retenir : un critère peut être
+correctement pondéré et rester inerte si sa *forme* ne discrimine pas sur la
+population réelle. La pondération n'était pas en cause, la forme l'était.
 
 `models.py` : `LiquidityEvent`, `Lead`, `ScoreBreakdown` (pydantic).
 `scoring.py` : fonction pure et déterministe. Critères :

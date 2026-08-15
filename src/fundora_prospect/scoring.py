@@ -44,7 +44,8 @@ class CritereMontant:
 class CritereFraicheur:
     poids: float
     motif: str
-    fenetre_pleine_jours: int
+    forme: str
+    demi_vie_jours: int
     fenetre_nulle_jours: int
 
 
@@ -100,7 +101,8 @@ class GrillePonderation:
             fraicheur=CritereFraicheur(
                 poids=charge["fraicheur"]["poids"],
                 motif=charge["fraicheur"]["motif"].strip(),
-                fenetre_pleine_jours=charge["fraicheur"]["fenetre_pleine_jours"],
+                forme=charge["fraicheur"]["forme"],
+                demi_vie_jours=charge["fraicheur"]["demi_vie_jours"],
                 fenetre_nulle_jours=charge["fraicheur"]["fenetre_nulle_jours"],
             ),
             secteur=CritereSecteur(
@@ -152,13 +154,30 @@ def normaliser_montant(montant: float | None, critere: CritereMontant) -> float 
 
 
 def normaliser_fraicheur(jours: int, critere: CritereFraicheur) -> float:
-    """Contribution pleine jusqu'a la fenetre, puis decroissance lineaire."""
-    if jours <= critere.fenetre_pleine_jours:
+    """Decroit DES LE PREMIER JOUR, sans plateau.
+
+    Le delai est le critere le plus decisif du metier : une cession de trois
+    semaines et une de onze mois ne sont pas le meme prospect. Dans le premier
+    cas le produit est encore en tresorerie et la decision de placement n'est
+    pas prise, dans le second l'argent a deja trouve une destination.
+
+    Un plateau ferait de la fraicheur une fenetre de pertinence commerciale la
+    ou il faut un critere de discrimination — c'est ce qui rendait le
+    classement equivalent a un tri par montant.
+
+    La forme vient de la configuration. La demi-vie modelise mieux le
+    phenomene : la probabilite que le cash soit encore disponible decroit
+    continument, sans date de bascule.
+    """
+    if jours <= 0:
         return 1.0
-    if jours >= critere.fenetre_nulle_jours:
-        return 0.0
-    etendue = critere.fenetre_nulle_jours - critere.fenetre_pleine_jours
-    return 1.0 - (jours - critere.fenetre_pleine_jours) / etendue
+    if critere.forme == "lineaire":
+        return max(0.0, 1.0 - jours / critere.fenetre_nulle_jours)
+    if critere.forme == "demi_vie":
+        return 0.5 ** (jours / critere.demi_vie_jours)
+    raise ValueError(
+        f"forme de decroissance inconnue : {critere.forme!r} (attendu 'demi_vie' ou 'lineaire')"
+    )
 
 
 # --- Evaluation ---------------------------------------------------------------
@@ -224,9 +243,13 @@ def evaluer(
             valeur_normalisee=valeur_fraicheur,
             points=round(valeur_fraicheur * grille.fraicheur.poids, 4),
             motif=(
-                f"{jours} jours depuis la {origine} ; contribution pleine "
-                f"jusqu'a {grille.fraicheur.fenetre_pleine_jours} jours, "
-                f"nulle a partir de {grille.fraicheur.fenetre_nulle_jours}"
+                f"{jours} jours depuis la {origine} ; decroissance "
+                f"{grille.fraicheur.forme} des le premier jour"
+                + (
+                    f", demi-vie {grille.fraicheur.demi_vie_jours} jours"
+                    if grille.fraicheur.forme == "demi_vie"
+                    else f", nulle a {grille.fraicheur.fenetre_nulle_jours} jours"
+                )
             ),
         )
     )
