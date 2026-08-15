@@ -18,6 +18,8 @@ fundora-prospect-mcp = "fundora_prospect.mcp_server:main"
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+    # Lecture du frontmatter des SKILL.md dans les tests du plugin.
+    "pyyaml>=6.0",
 ]
 
 [build-system]
