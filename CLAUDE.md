@@ -480,7 +480,31 @@ diffusible est écartée.
 incomplet doit lever une erreur de validation.
 Gate : un test prouve qu'un lead sans provenance ne peut pas être exporté.
 
-### Phase 4 — Serveur MCP (J3 matin)
+### Phase 4 — Serveur MCP ✅ FAIT
+
+`search_liquidity_events` execute **le pipeline complet** et rend des leads
+deja scores et tries. Ecart assume a la lettre de la spec : trois outils
+strictement granulaires obligeraient le modele a orchestrer des dizaines
+d'appels, ce qui est lent et indemontrable en direct. `enrich_company` et
+`score_lead` restent exposes pour inspecter un cas isole.
+
+**La sortie porte les motifs de refus**, ventiles : « 458 annonces examinees,
+5 classables, 333 sous le montant minimum, 6 apport, 2 absent, 2 acte trop
+ancien ». L'auditabilite doit etre visible dans le transport, pas seulement
+dans les tests.
+
+**Le pre-classement avant enrichissement se fait sur le SCORE PROVISOIRE, pas
+sur le montant.** L'enrichissement coute un appel API par lead, donc seul le
+haut du panier est enrichi — mais trier sur le montant reintroduirait le biais
+que la Phase 2 a corrige, et une cession fraiche mais modeste ne serait jamais
+enrichie donc jamais rendue.
+
+Les descriptions d'outils sont du prompt, pas de la documentation : elles
+disent le format attendu (`"06"` et non `6`), les unites, et que les resultats
+sortent deja tries. Le type `str | int` rattrape un modele qui passerait un
+entier, le schema JSON le refuserait avant normalisation.
+
+### Phase 4 — specification d'origine
 `mcp_server.py` en stdio, exposant :
 - `search_liquidity_events(departement, mois, montant_min)`
 - `enrich_company(siren)`

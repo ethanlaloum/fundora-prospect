@@ -1,0 +1,372 @@
+"""Serveur MCP — test d'integration avec un client in-process.
+
+Le serveur est le point d'entree du plugin : c'est lui que Claude Code appelle
+quand on ecrit « trouve-moi les cessions de plus de 300 k EUR dans le 06 ».
+Ces tests passent par un vrai `ClientSession` sur des flux en memoire, pas par
+un appel direct aux fonctions Python — sinon on ne testerait pas la couche qui
+casse en production : schema des outils, validation des arguments, forme de la
+reponse.
+
+Aucun appel reseau : la recherche et l'enrichissement sont substitues par des
+donnees issues des fixtures figees.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import anyio
+import pytest
+from mcp.client.session import ClientSession
+from mcp.shared.memory import create_client_server_memory_streams
+
+from fundora_prospect import mcp_server
+from fundora_prospect.bodacc import construire_annonce
+from fundora_prospect.enrichment import Enrichissement
+from fundora_prospect.models import StatutEntreprise
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def annonces_de(nom: str) -> list:
+    charge = json.loads((FIXTURES / f"{nom}.json").read_text(encoding="utf-8"))
+    return [a for brut in charge if (a := construire_annonce(brut)) is not None]
+
+
+def appeler(outil: str, arguments: dict[str, Any]) -> Any:
+    """Ouvre un client MCP in-process et appelle un outil."""
+
+    async def scenario() -> Any:
+        bas_niveau = mcp_server.serveur._lowlevel_server
+        async with (
+            create_client_server_memory_streams() as ((cr, cw), (sr, sw)),
+            anyio.create_task_group() as tg,
+        ):
+            tg.start_soon(
+                lambda: bas_niveau.run(
+                    sr, sw, bas_niveau.create_initialization_options(), raise_exceptions=True
+                )
+            )
+            async with ClientSession(cr, cw) as session:
+                await session.initialize()
+                resultat = await session.call_tool(outil, arguments)
+            tg.cancel_scope.cancel()
+            return resultat
+
+    return anyio.run(scenario)
+
+
+def lister_outils() -> list:
+    async def scenario() -> list:
+        bas_niveau = mcp_server.serveur._lowlevel_server
+        async with (
+            create_client_server_memory_streams() as ((cr, cw), (sr, sw)),
+            anyio.create_task_group() as tg,
+        ):
+            tg.start_soon(
+                lambda: bas_niveau.run(
+                    sr, sw, bas_niveau.create_initialization_options(), raise_exceptions=True
+                )
+            )
+            async with ClientSession(cr, cw) as session:
+                await session.initialize()
+                outils = (await session.list_tools()).tools
+            tg.cancel_scope.cancel()
+            return outils
+
+    return anyio.run(scenario)
+
+
+@pytest.fixture
+def sans_reseau(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+    """Substitue recherche et enrichissement par des donnees de fixtures."""
+
+    def installer(
+        annonces: list | None = None,
+        statut: StatutEntreprise = StatutEntreprise.ACTIVE,
+    ) -> None:
+        corpus = annonces if annonces is not None else annonces_de("acte_datable_recent")
+        monkeypatch.setattr(mcp_server, "rechercher", lambda **_: list(corpus))
+        monkeypatch.setattr(
+            mcp_server,
+            "enrichir",
+            lambda siren, **_: Enrichissement(
+                siren=str(siren or ""),
+                statut=statut,
+                code_ape="10.71C",
+                section_ape="C",
+                motif="fixture",
+            ),
+        )
+
+    return installer
+
+
+# --- Contrat des outils -------------------------------------------------------
+
+
+def test_les_trois_outils_sont_exposes() -> None:
+    noms = {o.name for o in lister_outils()}
+    assert noms == {"search_liquidity_events", "enrich_company", "score_lead"}
+
+
+def test_chaque_outil_porte_une_description_utilisable() -> None:
+    """La description est ce que le modele lit pour decider quoi appeler : c'est
+    du prompt, pas de la documentation decorative."""
+    for outil in lister_outils():
+        assert outil.description and len(outil.description) > 80, outil.name
+
+
+def test_la_description_de_la_recherche_precise_le_format_du_departement() -> None:
+    """Un modele passera `6` au lieu de `"06"` si on ne le lui dit pas."""
+    recherche = next(o for o in lister_outils() if o.name == "search_liquidity_events")
+    assert '"06"' in recherche.description
+
+
+# --- Recherche : le pipeline complet -----------------------------------------
+
+
+def test_la_recherche_rend_des_leads_deja_scores(sans_reseau) -> None:
+    """Un seul appel doit suffire : trois outils granulaires forceraient le
+    modele a orchestrer des dizaines d'appels."""
+    sans_reseau()
+    resultat = appeler("search_liquidity_events", {"departement": "13", "mois": 12})
+    charge = resultat.structured_content
+
+    assert charge["leads"], "aucun lead rendu"
+    premier = charge["leads"][0]
+    assert premier["score"] > 0
+    assert premier["cedant"]
+    assert premier["url_publication"].startswith("https://www.bodacc.fr/")
+    assert premier["breakdown"], "le detail du score doit voyager jusqu'au client"
+
+
+def test_les_leads_sont_tries_par_score_decroissant(sans_reseau) -> None:
+    sans_reseau()
+    charge = appeler("search_liquidity_events", {"departement": "13"}).structured_content
+    scores = [lead["score"] for lead in charge["leads"]]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_la_sortie_porte_les_motifs_de_refus(sans_reseau) -> None:
+    """L'auditabilite construite depuis la Phase 1 doit etre VISIBLE dans le
+    transport MCP, sinon elle n'existe que dans les tests."""
+    sans_reseau(
+        annonces=annonces_de("acte_datable_recent")
+        + annonces_de("apport_en_nature")
+        + annonces_de("devise_francs")
+    )
+    charge = appeler("search_liquidity_events", {"departement": "13"}).structured_content
+
+    stats = charge["statistiques"]
+    assert stats["annonces_examinees"] > 0
+    assert stats["leads_classables"] >= 0
+    assert stats["ecartes"], "les refus doivent etre ventiles par motif"
+    assert sum(stats["ecartes"].values()) > 0
+    assert "resume" in charge and str(stats["annonces_examinees"]) in charge["resume"]
+
+
+def test_une_societe_cessee_est_ecartee_et_comptee(sans_reseau) -> None:
+    sans_reseau(statut=StatutEntreprise.CESSEE)
+    charge = appeler("search_liquidity_events", {"departement": "13"}).structured_content
+    assert charge["leads"] == []
+    assert any("cess" in motif.lower() for motif in charge["statistiques"]["ecartes"])
+
+
+def test_le_montant_minimum_filtre(sans_reseau) -> None:
+    sans_reseau()
+    haut = appeler(
+        "search_liquidity_events", {"departement": "13", "montant_min": 10_000_000}
+    ).structured_content
+    assert haut["leads"] == []
+
+
+def test_la_limite_borne_le_nombre_de_leads(sans_reseau) -> None:
+    sans_reseau()
+    charge = appeler(
+        "search_liquidity_events", {"departement": "13", "limite": 1}
+    ).structured_content
+    assert len(charge["leads"]) <= 1
+
+
+# --- Normalisation des parametres --------------------------------------------
+
+
+@pytest.mark.parametrize("brut", ["06", "6", 6, " 06 "])
+def test_le_departement_est_normalise(sans_reseau, brut: Any) -> None:
+    """Un modele ecrit `6`, `"6"` ou `"06"` indifferemment. Le zero initial se
+    perd des qu'on laisse passer un entier."""
+    sans_reseau()
+    charge = appeler("search_liquidity_events", {"departement": brut}).structured_content
+    assert charge["departements"] == ["06"]
+
+
+def test_paca_est_un_alias_de_la_region(sans_reseau) -> None:
+    sans_reseau()
+    charge = appeler("search_liquidity_events", {"departement": "PACA"}).structured_content
+    assert charge["departements"] == ["04", "05", "06", "13", "83", "84"]
+
+
+def test_plusieurs_departements_separes_par_virgule(sans_reseau) -> None:
+    sans_reseau()
+    charge = appeler("search_liquidity_events", {"departement": "06,13"}).structured_content
+    assert charge["departements"] == ["06", "13"]
+
+
+def test_un_departement_invalide_donne_un_message_actionnable(sans_reseau) -> None:
+    """Un message d'erreur lisible par un modele est un message qui lui permet
+    de se corriger seul."""
+    sans_reseau()
+    resultat = appeler("search_liquidity_events", {"departement": "Alpes-Maritimes"})
+    assert resultat.is_error
+    texte = resultat.content[0].text.lower()
+    assert "departement" in texte
+    assert "06" in texte
+
+
+@pytest.mark.parametrize(("champ", "valeur"), [("mois", 0), ("mois", 999), ("limite", 0)])
+def test_les_bornes_sont_refusees_avec_explication(sans_reseau, champ: str, valeur: int) -> None:
+    sans_reseau()
+    resultat = appeler("search_liquidity_events", {"departement": "13", champ: valeur})
+    assert resultat.is_error
+    assert champ in resultat.content[0].text.lower()
+
+
+# --- Outils granulaires -------------------------------------------------------
+
+
+def test_enrich_company(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        mcp_server,
+        "enrichir",
+        lambda siren, **_: Enrichissement(
+            siren=siren,
+            statut=StatutEntreprise.ACTIVE,
+            code_ape="56.10A",
+            section_ape="I",
+            motif="societe active",
+        ),
+    )
+    charge = appeler("enrich_company", {"siren": "852872563"}).structured_content
+    assert charge["statut"] == "active"
+    assert charge["code_ape"] == "56.10A"
+    assert charge["motif"]
+
+
+def test_enrich_company_refuse_un_siren_mal_forme() -> None:
+    resultat = appeler("enrich_company", {"siren": "12345"})
+    assert resultat.is_error
+    assert "siren" in resultat.content[0].text.lower()
+
+
+def test_score_lead_rend_un_breakdown_complet() -> None:
+    charge = appeler(
+        "score_lead",
+        {"montant_eur": 400_000, "date_acte": "2026-07-01", "departement": "06"},
+    ).structured_content
+    assert charge["classable"]
+    assert charge["score"] > 0
+    assert len(charge["breakdown"]) == 4
+    assert all(c["motif"] for c in charge["breakdown"])
+    assert sum(c["points"] for c in charge["breakdown"]) == pytest.approx(charge["score"])
+
+
+def test_score_lead_explique_un_refus() -> None:
+    charge = appeler(
+        "score_lead",
+        {"montant_eur": 400_000, "date_acte": "2026-07-01", "statut_cedant": "cessee"},
+    ).structured_content
+    assert not charge["classable"]
+    assert charge["motif_refus"]
+
+
+def test_score_lead_refuse_une_date_illisible() -> None:
+    resultat = appeler("score_lead", {"montant_eur": 400_000, "date_acte": "hier"})
+    assert resultat.is_error
+    assert "aaaa-mm-jj" in resultat.content[0].text.lower()
+
+
+# --- Degradation --------------------------------------------------------------
+
+
+def test_une_api_muette_ne_fait_pas_echouer_la_recherche(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Un lead sans enrichissement reste un lead valide — la regle de la
+    Phase 3 doit survivre au passage par MCP."""
+    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: annonces_de("acte_datable_recent"))
+    monkeypatch.setattr(
+        mcp_server,
+        "enrichir",
+        lambda siren, **_: Enrichissement(
+            siren=str(siren or ""),
+            statut=StatutEntreprise.INCONNU,
+            motif="API entreprises injoignable : ConnectError",
+        ),
+    )
+    charge = appeler("search_liquidity_events", {"departement": "13"}).structured_content
+    assert charge["leads"], "les leads doivent survivre a une API muette"
+    assert "injoignable" in charge["leads"][0]["statut_motif"]
+
+
+def test_le_preclassement_ne_trie_pas_sur_le_montant_seul(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """N'enrichir que le haut du panier est necessaire — l'enrichissement coute
+    un appel API par lead — mais trier sur le montant reintroduirait le biais
+    que la grille a corrige : une cession fraiche mais modeste ne serait jamais
+    enrichie, donc jamais rendue.
+
+    Ici, la cession la plus recente a le montant le PLUS FAIBLE. Avec une
+    limite de 1, elle doit quand meme sortir.
+    """
+    from datetime import date, timedelta
+
+    from fundora_prospect.bodacc import Annonce, Cedant
+    from fundora_prospect.prix import Confiance, PrixCession, Qualification
+
+    aujourdhui = date.today()
+
+    def fabriquer(identifiant: str, montant: float, jours: int) -> Annonce:
+        acte = aujourdhui - timedelta(days=jours)
+        return Annonce(
+            id=identifiant,
+            date_parution=acte,
+            date_acte=acte,
+            departement="06",
+            url_publication=f"https://www.bodacc.fr/x/{identifiant}",
+            categorie_vente=None,
+            activite=None,
+            cedant=Cedant(denomination=identifiant, type_personne="pm", siren="852872563"),
+            prix=PrixCession(
+                montant=montant,
+                devise="EUR",
+                qualification=Qualification.ACHAT,
+                methode="test",
+                texte_source="",
+                confiance=Confiance.ACTE_DATE,
+                ecart_acte_jours=0,
+            ),
+        )
+
+    corpus = [
+        fabriquer("GROSSE-ET-VIEILLE", 1_500_000, 900),
+        fabriquer("MODESTE-ET-FRAICHE", 260_000, 5),
+    ]
+    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: corpus)
+    monkeypatch.setattr(
+        mcp_server,
+        "enrichir",
+        lambda siren, **_: Enrichissement(
+            siren=str(siren or ""), statut=StatutEntreprise.ACTIVE, motif="fixture"
+        ),
+    )
+
+    charge = appeler(
+        "search_liquidity_events", {"departement": "06", "limite": 1}
+    ).structured_content
+    assert charge["leads"], "aucun lead rendu"
+    assert charge["leads"][0]["cedant"] == "MODESTE-ET-FRAICHE"

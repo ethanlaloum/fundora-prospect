@@ -8,7 +8,7 @@ ne sait pas quels leads se transforment. Le vocabulaire du module le dit —
 croire a une validation empirique qui n'a pas eu lieu, et c'est indefendable
 devant un CIF.
 
-Les poids vivent dans `config/ponderation.toml`, charge au runtime. Recalibrer
+Les poids vivent dans `src/fundora_prospect/config/ponderation.toml`, charge au runtime. Recalibrer
 la grille ne doit toucher aucun fichier `.py`.
 
 La fonction `evaluer` est pure et deterministe : meme entree, meme sortie. La
@@ -40,13 +40,12 @@ def chemin_ponderation() -> Path:
 
     1. La variable d'environnement `FUNDORA_PONDERATION`, qui permet de pointer
        une grille recalibree sans toucher au depot.
-    2. La donnee de paquet, seul chemin qui fonctionne apres `pip install`
-       sans `-e` — le cas du serveur MCP, lance en stdio depuis un repertoire
-       arbitraire, et du plugin empaquete.
-    3. Le fichier a la racine du depot, pour le developpement en editable.
+    2. La donnee de paquet, `src/fundora_prospect/config/ponderation.toml`,
+       qui voyage avec le module quel que soit le mode d'installation.
 
-    Un simple `Path(__file__).parents[2]` ne couvrait que le troisieme cas et
-    levait un `FileNotFoundError` sur une installation normale.
+    Un simple `Path(__file__).parents[2]` ne couvrait que l'execution depuis le
+    depot et levait un `FileNotFoundError` sur une installation normale — le
+    cas du serveur MCP, lance en stdio depuis un repertoire arbitraire.
     """
     force = os.environ.get(VARIABLE_PONDERATION)
     if force:
@@ -64,13 +63,12 @@ def chemin_ponderation() -> Path:
     except (ModuleNotFoundError, TypeError, OSError):  # pragma: no cover
         pass
 
-    depot = Path(__file__).resolve().parents[2] / "config" / "ponderation.toml"
-    if depot.is_file():
-        return depot
+    voisin = Path(__file__).resolve().parent / "config" / "ponderation.toml"
+    if voisin.is_file():
+        return voisin
 
     raise FileNotFoundError(
-        "ponderation.toml introuvable : ni via "
-        f"{VARIABLE_PONDERATION}, ni dans le paquet, ni a la racine du depot"
+        f"ponderation.toml introuvable : ni via {VARIABLE_PONDERATION}, ni dans le paquet"
     )
 
 
