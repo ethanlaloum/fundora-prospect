@@ -420,7 +420,7 @@ liste blanche qui l'a révélée, en refusant un mot inconnu dans une fixture.
 
 ### La grille n'est pas calibrée
 
-Les poids — 55 pour le montant, 35 pour la fraîcheur, 10 pour le secteur, 0
+Les poids — 55 pour le montant, 45 pour la fraîcheur, 0 pour le secteur, 0
 pour le département — sont des **hypothèses commerciales**. Aucune donnée de
 conversion n'existe pour les valider.
 
@@ -490,9 +490,10 @@ l'étayer.
 **Une hypothèse de départ s'est révélée fausse**, et c'est ce à quoi sert une
 mesure : je supposais qu'il faudrait écarter les cédants de la **section K
 (activités financières)**, véhicules déjà accompagnés et hors ICP. Mesure :
-**K représente 0 % du flux.** Les 8,6 % que je pensais y trouver sont en
-section L (immobilier), pour laquelle l'argument « professionnel de la
-finance » ne tient pas. La règle n'a pas été implémentée.
+**aucune occurrence sur les 105 cédants enrichis ; un cas observé depuis, en
+64.30Z.** Les 8,6 % que je pensais trouver en K sont en section L (immobilier),
+pour laquelle l'argument « professionnel de la finance » ne tient pas. La règle
+n'a pas été implémentée.
 
 Si une hiérarchie sectorielle devait exister un jour, elle porterait sur la
 **section** — 21 valeurs, seul niveau qu'un humain puisse défendre, et le seul

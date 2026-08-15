@@ -237,6 +237,41 @@ exploiter une base constituée illégalement.
    motif explicite, jamais scorés à zéro — un zéro se noierait dans le flux,
    un rejet motivé est auditable.
 
+## Audit d'historique avant passage en public
+
+Réalisé sur `git log --all`, tous chemins, toutes branches, y compris les blobs
+devenus inatteignables.
+
+**Périmètre couvert.** 100 objets analysés : chaque version de chaque fichier
+ayant jamais existé, plus les messages de commit et les identités d'auteur.
+Les **25 versions historiques de fixtures** ont été revalidées une à une contre
+la liste blanche courante — chemins déclarés, gabarits, vocabulaire fermé,
+lexique d'`origineFonds`.
+
+**Résultat : aucune donnée personnelle dans l'historique.**
+
+- `explore/out/` — les dumps bruts — n'a jamais été commité : zéro occurrence.
+- Les quatre champs à risque (`acte.descriptif`, `acte.vente.opposition`,
+  `commercant`, `listepersonnes.personne.administration`) sont substitués dès
+  le tout premier commit de fixtures.
+- Aucun nom, adresse réelle, téléphone, email, IBAN ni secret.
+- Les 30 alertes du balayage automatique sont toutes des faux positifs :
+  l'adresse synthétique `1 Rue de la Fixture`, le mot « token » dans une
+  variable Python, et les URL d'attaque volontaires des tests de whitelist.
+
+**Une seule résidu réel, non personnel.** Huit blobs antérieurs à la décision
+de substitution portent **25 valeurs `activite` réelles** — des descriptions
+d'activité commerciale : « Meunerie », « Gîte rural », « Négoce et distribution
+de produits pétroliers ». Vérifié : aucune ne contient de marqueur de donnée
+personnelle. Leur substitution ultérieure était une décision de **rigueur** —
+un texte libre ouvert n'est pas validable par liste blanche — et non la
+correction d'une fuite.
+
+**Pas de réécriture d'historique.** Ces valeurs ne sont pas des données
+personnelles, et un `filter-repo` changerait tous les SHA : sur un projet dont
+l'historique de décisions est lui-même un livrable, le coût dépasse largement
+le bénéfice.
+
 ## Stack
 
 - Python 3.11+, `httpx`, `pydantic`, `pytest`, `ruff`
@@ -408,6 +443,43 @@ actes assez anciens pour sortir du plateau.
 **Corrigé** — voir ci-dessus. La leçon à retenir : un critère peut être
 correctement pondéré et rester inerte si sa *forme* ne discrimine pas sur la
 population réelle. La pondération n'était pas en cause, la forme l'était.
+
+### Leçon générale : un chiffre frappant se détache de son référent
+
+**Trois occurrences sur ce projet.** Ce n'est plus un accident, c'est un
+mécanisme, et il mérite d'être nommé.
+
+| Chiffre | Ce qu'il désignait vraiment | Ce qu'il est devenu en circulant |
+|---|---|---|
+| **86 %** | la *part* des personnes morales parmi les cessions > 200 k€ — ce qu'on **garde** | « le recentrage écarte 86 % » — l'inverse exact |
+| **~1 046/an** | volume **tous cédants confondus** | attaché au segment personne morale, qui vaut ~898 |
+| **0 %** | aucune occurrence de section K **sur 105 cédants enrichis** | « K représente 0 % du flux », contredit par un cas observé depuis |
+
+Le schéma est toujours le même : **le chiffre est plus mémorable que sa
+condition d'obtention.** On retient « 86 % », « 1 046 », « 0 % » ; on oublie
+« parmi les cessions > 200 k€ », « tous cédants confondus », « sur cet
+échantillon-là ». Le chiffre se met alors à circuler seul, et il finit par être
+réutilisé dans un contexte où il est faux — souvent en signifiant l'inverse.
+
+Un quatrième cas a été trouvé lors de l'audit final : le README annonçait
+encore « 35 pour la fraîcheur, 10 pour le secteur » alors que la Phase 3 avait
+reporté ces poids à 45 et 0. Même mécanisme, appliqué à un paramètre : la
+valeur avait survécu au changement de sa source.
+
+**Règles de travail qui en découlent :**
+
+1. **Un chiffre ne s'écrit jamais sans son référent** dans la même phrase.
+   « 86 % des cessions > 200 k€ ont un cédant personne morale », jamais « 86 %
+   des cessions ».
+2. **Quand deux chiffres proches existent, écrire les deux ensemble** avec ce
+   qui les sépare. ~1 046 tous cédants / ~898 personnes morales, jamais l'un
+   sans l'autre.
+3. **Un chiffre issu d'un échantillon dit son échantillon.** « aucune
+   occurrence sur les 105 cédants enrichis », pas « 0 % du flux ».
+4. **Tout paramètre cité dans la documentation doit être vérifiable contre sa
+   source.** Les poids, seuils et bornes vivent dans la configuration ou le
+   code : la documentation les recopie, donc elle dérive. Les recontrôler fait
+   partie de la relecture finale, pas de la bonne volonté.
 
 ### Leçon générale : un tri en amont est un filtre
 
