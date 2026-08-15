@@ -15,6 +15,7 @@ import pytest
 from fundora_prospect.models import Evaluation, LiquidityEvent, TypeCedant
 from fundora_prospect.scoring import (
     GrillePonderation,
+    chemin_ponderation,
     correlation_spearman,
     evaluer,
     normaliser_fraicheur,
@@ -386,7 +387,7 @@ def test_les_poids_sont_rechargeables_sans_toucher_au_code(
 ) -> None:
     """Recalibrer ne doit modifier aucun .py."""
     variante = tmp_path / "ponderation.toml"
-    source = GrillePonderation.CHEMIN_DEFAUT.read_text(encoding="utf-8")
+    source = chemin_ponderation().read_text(encoding="utf-8")
     variante.write_text(
         source.replace("poids = 55", "poids = 40").replace("poids = 45", "poids = 60"),
         encoding="utf-8",
@@ -488,3 +489,33 @@ def test_le_score_maximal_reste_atteignable(grille: GrillePonderation) -> None:
     parfait = evenement(montant=grille.montant.plafond_eur, date_acte=AUJOURDHUI)
     evaluation = evaluer(parfait, grille, aujourdhui=AUJOURDHUI)
     assert evaluation.score == pytest.approx(100.0)
+
+
+# --- Resolution du fichier de ponderation -----------------------------------
+
+
+def test_la_variable_d_environnement_a_la_precedence(tmp_path, monkeypatch) -> None:
+    """`FUNDORA_PONDERATION` permet de pointer une grille recalibree sans
+    toucher au depot ni au paquet installe."""
+    variante = tmp_path / "autre.toml"
+    variante.write_text(
+        chemin_ponderation().read_text(encoding="utf-8").replace("poids = 55", "poids = 42"),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FUNDORA_PONDERATION", str(variante))
+    assert chemin_ponderation() == variante
+    assert GrillePonderation.defaut().montant.poids == 42
+
+
+def test_variable_pointant_un_fichier_absent_leve_clairement(monkeypatch) -> None:
+    """Echouer en silence sur une grille absente donnerait un scoring faux."""
+    monkeypatch.setenv("FUNDORA_PONDERATION", "/introuvable/ponderation.toml")
+    with pytest.raises(FileNotFoundError, match="FUNDORA_PONDERATION"):
+        chemin_ponderation()
+
+
+def test_la_grille_se_charge_sans_variable(monkeypatch) -> None:
+    """Sans variable : donnee de paquet, puis racine du depot."""
+    monkeypatch.delenv("FUNDORA_PONDERATION", raising=False)
+    assert chemin_ponderation().is_file()
+    assert GrillePonderation.defaut().montant.poids == 55

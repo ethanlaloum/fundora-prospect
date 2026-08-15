@@ -21,6 +21,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/fundora_prospect"]
 
+# `config/ponderation.toml` reste a la RACINE du depot — c'est la que le
+# lecteur le cherche, et c'est ce que la documentation designe. Mais il doit
+# aussi voyager dans la roue, sinon une installation sans `-e` n'a aucune
+# grille a charger : c'est le cas du serveur MCP et du plugin empaquete.
+[tool.hatch.build.targets.wheel.force-include]
+"config/ponderation.toml" = "fundora_prospect/config/ponderation.toml"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # `src` pour le package, `.` pour `tools/` (recorder de fixtures et vocabulaire

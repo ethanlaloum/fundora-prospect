@@ -433,10 +433,21 @@ du classement : peu de volume, mais ce sont exactement les bons à retirer.
 ## Reproduire les chiffres
 
 ```bash
-python3.13 -m venv .venv
+python3 -m venv .venv                   # Python 3.11 ou plus recent
 .venv/bin/pip install -e ".[dev]"
 git config core.hooksPath .githooks     # active le garde-fou RGPD
 ```
+
+Deux variables d'environnement, toutes deux optionnelles :
+
+| Variable | Effet |
+|---|---|
+| `FUNDORA_CACHE_DIR` | déplace le cache HTTP. `FUNDORA_CACHE_DIR=$(mktemp -d)` force une exécution **à froid**, sans réponse en cache |
+| `FUNDORA_PONDERATION` | pointe une grille de pondération recalibrée, sans toucher au dépôt |
+
+Le cache vit par défaut dans `~/.cache/fundora-prospect/`, **hors du dépôt** :
+il contient des réponses d'API avec des données personnelles réelles, et le
+`.gitignore` protège du commit, pas d'une archive du répertoire de travail.
 
 | Commande | Ce qu'elle produit |
 |---|---|
@@ -448,10 +459,24 @@ git config core.hooksPath .githooks     # active le garde-fou RGPD
 
 Chaque chiffre de ce README sort d'une de ces commandes.
 
-**Note sur la reproductibilité** : les mesures réseau tirent un échantillon
-frais à chaque exécution. Les valeurs varient de quelques unités d'un run à
-l'autre — ~895 à ~898 pour le volume annuel. Les ordres de grandeur sont
-stables, les décimales ne le sont pas.
+**Note sur la reproductibilité.** Vérifié depuis un clone vierge : installation,
+suite hors ligne, suite réseau et scripts d'exploration passent, et le dépôt
+reste propre — aucune donnée runtime n'y atterrit.
+
+Trois réserves honnêtes :
+
+- Les mesures réseau tirent un échantillon frais à chaque exécution. Les
+  valeurs bougent de quelques unités — ~895 à ~898 pour le volume annuel. Les
+  ordres de grandeur sont stables, les décimales ne le sont pas.
+- À froid, la suite réseau prend ~5 s au lieu de ~0,2 s : la différence est le
+  cache. Utiliser `FUNDORA_CACHE_DIR` pour mesurer sans cache.
+- **`tools/record_fixtures.py` fera dériver les fixtures avec le temps.** Une
+  de ses requêtes trie par date de parution décroissante : les annonces les
+  plus récentes changent chaque jour, donc une recapture ultérieure produira
+  d'autres cas et salira l'arbre de travail. C'est voulu — figer cette requête
+  échangerait de la fraîcheur de donnée réelle contre une reproductibilité de
+  façade. Ne relancer le recorder que pour rafraîchir volontairement les
+  fixtures, et relire le diff.
 
 ---
 

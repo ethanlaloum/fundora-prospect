@@ -91,7 +91,7 @@ def test_le_message_d_erreur_nomme_le_domaine_et_les_autorises(client: httpx.Cli
 
 def test_creer_client_est_whiteliste_par_defaut() -> None:
     """Le client fourni par le module ne peut pas etre construit sans whitelist."""
-    with creer_client(cache=None) as c, pytest.raises(DomaineNonAutoriseError):
+    with creer_client(sans_cache=True) as c, pytest.raises(DomaineNonAutoriseError):
         c.get("https://example.com/")
 
 
@@ -110,3 +110,36 @@ def test_redirection_vers_un_domaine_non_autorise_est_bloquee(
     )
     with pytest.raises(DomaineNonAutoriseError):
         client.get("https://bodacc-datadila.opendatasoft.com/x")
+
+
+# --- Repertoire du cache ------------------------------------------------------
+
+
+def test_le_cache_est_hors_du_depot_par_defaut(monkeypatch) -> None:
+    """Les reponses en cache contiennent des donnees personnelles reelles : le
+    .gitignore protege du commit, pas d'une archive du repertoire de travail."""
+    from pathlib import Path
+
+    from fundora_prospect.http import repertoire_cache
+
+    monkeypatch.delenv("FUNDORA_CACHE_DIR", raising=False)
+    chemin = repertoire_cache()
+    assert chemin.is_relative_to(Path.home())
+    assert "fundora-prospect" in str(chemin)
+
+
+def test_le_cache_est_surchargeable_par_variable(monkeypatch, tmp_path) -> None:
+    """Sans cette variable, la seule facon de verifier une mesure a froid etait
+    de detourner HOME — ni documentable ni sur."""
+    from fundora_prospect.http import repertoire_cache
+
+    monkeypatch.setenv("FUNDORA_CACHE_DIR", str(tmp_path / "froid"))
+    assert repertoire_cache() == tmp_path / "froid"
+
+
+def test_sans_cache_n_ecrit_rien_sur_disque(monkeypatch, tmp_path) -> None:
+    vide = tmp_path / "jamais-cree"
+    monkeypatch.setenv("FUNDORA_CACHE_DIR", str(vide))
+    with creer_client(sans_cache=True):
+        pass
+    assert not vide.exists()
