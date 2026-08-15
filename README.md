@@ -13,10 +13,10 @@ Sur cette base :
 > Provence-Alpes-Côte d'Azur, avec un cédant personne morale identifié, son
 > SIREN et l'URL de sa publication au BODACC.**
 
-Chiffre **mesuré**, pas estimé. Reproductible :
+Chiffre **mesuré**, pas estimé. Démonstration complète en une commande :
 
 ```bash
-.venv/bin/python -m pytest -m network -q -s
+./demo.sh
 ```
 
 ---
@@ -315,6 +315,59 @@ ne serait jamais enrichie, donc jamais rendue. Un test le vérifie.
 
 ---
 
+## Le plugin Claude Code
+
+```
+.claude-plugin/plugin.json          manifeste — SEUL fichier de ce dossier
+.mcp.json                           declaration du serveur MCP
+hooks/hooks.json                    hook PreToolUse
+hooks/whitelist_domaines.py         le garde-fou
+skills/scan-liquidity-events/       « trouve-moi les cessions… »
+skills/score-lead/                  « pourquoi ce lead a-t-il ce score ? »
+```
+
+`skills/` et `hooks/` sont à la **racine**, jamais dans `.claude-plugin/` — l'y
+placer est l'erreur la plus fréquente, et elle échoue silencieusement : le
+plugin se charge, les compétences sont ignorées. Un test le vérifie plutôt
+qu'une relecture.
+
+### Deux verrous, deux périmètres
+
+La contrainte de whitelist est appliquée **deux fois**, à deux endroits qui ne
+se recouvrent pas :
+
+| Verrou | Ce qu'il barre | Ce qu'il ne voit pas |
+|---|---|---|
+| **Hook `PreToolUse`** | l'**agent** — `WebFetch`, `WebSearch`, `Bash` | une URL cachée dans un fichier `.py` |
+| **Transport HTTP** | le **code** — tout `httpx` du projet | un `curl` tapé par l'agent |
+
+**Aucun des deux ne suffit seul, et le dire fait partie de la démonstration.**
+Un hook n'intercepte pas un `httpx.get()` enfoui dans un script : prétendre le
+contraire serait une démonstration de vendeur, et le trou se verrait. Les deux
+limites sont verrouillées par des tests, y compris celle du hook.
+
+Le refus est conçu pour être lisible en direct :
+
+```
+  APPEL RESEAU REFUSE — contrainte 2 du projet
+
+    domaine demande  : www.linkedin.com
+    domaines permis  : bodacc-datadila.opendatasoft.com
+                       recherche-entreprises.api.gouv.fr
+
+  fundora-prospect ne collecte que des publications legales
+  obligatoires. Un CIF agree AMF ne peut pas exploiter une base
+  constituee autrement.
+
+  Aucune connexion n'a ete ouverte.
+```
+
+Il tient en une hauteur d'écran, cite la contrainte par son numéro — le refus
+vient de la spécification, pas d'un garde-fou improvisé — et le domaine choisi
+pour la démonstration est celui qu'un commercial pressé tenterait vraiment.
+
+---
+
 ## Limites connues
 
 Cette section est la plus importante du document. Un pipeline de prospection
@@ -495,7 +548,8 @@ il contient des réponses d'API avec des données personnelles réelles, et le
 
 | Commande | Ce qu'elle produit |
 |---|---|
-| `.venv/bin/python -m pytest -q` | 334 tests unitaires, sur fixtures figées, sans réseau |
+| `./demo.sh` | démonstration complète : pipeline, hook, transport |
+| `.venv/bin/python -m pytest -q` | 371 tests unitaires, sur fixtures figées, sans réseau |
 | `.venv/bin/python -m pytest -m network -q -s` | volume annuel, taux de parsing par segment, corrélation de rang |
 | `.venv/bin/python explore/dump_bodacc.py` | structure de la donnée, taux de présence du prix |
 | `.venv/bin/python explore/probe_origine_fonds.py` | les montants en francs, les annonces multi-établissements |
@@ -524,10 +578,11 @@ Trois réserves honnêtes :
 
 ---
 
-## Suite prévue
+## Suite possible
 
-Packaging en plugin Claude Code, avec un hook `PreToolUse` bloquant les appels
-hors whitelist — un second verrou, au niveau de l'agent, complémentaire de
-celui posé au transport HTTP.
+Signaux secondaires non exploités : dissolutions avec boni de liquidation,
+radiations post-cession. Élargissement hors PACA — le critère départemental est
+déjà en place, à poids nul faute de base pour hiérarchiser.
 
-Le plugin n'existe pas à ce jour. Ce README ne décrit que ce qui tourne.
+Et la seule chose qui rendrait la grille défendable autrement que « à dire
+d'expert » : un retour de conversion, qui permettrait enfin de la calibrer.

@@ -409,6 +409,25 @@ actes assez anciens pour sortir du plateau.
 correctement pondéré et rester inerte si sa *forme* ne discrimine pas sur la
 population réelle. La pondération n'était pas en cause, la forme l'était.
 
+### Leçon générale : un tri en amont est un filtre
+
+Découvert en Phase 4, mais valable bien au-delà de ce projet.
+
+Le serveur MCP n'enrichit que le haut du panier — l'enrichissement coûte un
+appel API par lead. Ce pré-classement triait d'abord sur le **montant seul**,
+alors que le classement final combine montant et fraîcheur. Conséquence : une
+cession fraîche mais modeste n'entrait jamais dans le top-N enrichi, donc
+n'était **jamais rendue**. Le biais que la Phase 2 avait éliminé du classement
+était réintroduit par la porte de service.
+
+**Règle : tout tri placé en amont d'un pipeline est un filtre, et doit obéir
+aux mêmes règles que le classement final.** Un « simple tri pour optimiser »
+qui n'utilise pas les mêmes critères que le classement change silencieusement
+l'ensemble des résultats possibles. Il ne réordonne pas : il supprime.
+
+Le symptôme est traître parce que la sortie reste plausible — elle est
+simplement amputée de ce qu'on ne verra jamais.
+
 `models.py` : `LiquidityEvent`, `Lead`, `ScoreBreakdown` (pydantic).
 `scoring.py` : fonction pure et déterministe. Critères :
 - montant de cession (pondération forte, plafonnée)
@@ -511,7 +530,26 @@ entier, le schema JSON le refuserait avant normalisation.
 - `score_lead(event)`
 Gate : test d'intégration avec un client MCP in-process.
 
-### Phase 5 — Plugin + hook + démo (J3 après-midi)
+### Phase 5 — Plugin + hook + démo ✅ FAIT
+
+Arborescence conforme : `skills/` et `hooks/` a la RACINE, seul `plugin.json`
+dans `.claude-plugin/`. Verifie par un test, parce que l'erreur echoue
+silencieusement.
+
+**Les deux verrous sont scenarises explicitement.** Le hook barre l'agent, le
+transport barre le code, et la demo montre qu'aucun des deux ne suffit seul —
+le hook ne voit pas une URL cachee dans un fichier `.py`. Montrer la limite
+rend la demonstration plus forte : un recruteur technique la verrait de toute
+facon, et s'il la repere avant nous la demo devient une demo de vendeur. La
+limite est verrouillee par un test.
+
+Message de refus : tient en une hauteur d'ecran, cite la contrainte 2 par son
+numero, et vise un domaine evocateur (`www.linkedin.com`) plutot qu'un
+`example.com` abstrait.
+
+`./demo.sh` en une commande, trois actes : pipeline reel, hook, transport.
+
+### Phase 5 — specification d'origine
 Structure du plugin :
 ```
 .claude-plugin/plugin.json
