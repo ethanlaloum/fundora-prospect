@@ -1,0 +1,91 @@
+#!/bin/sh
+# Lanceur du serveur MCP — AUCUNE hypothese de venv.
+#
+# Pourquoi ce script existe. `.mcp.json` visait auparavant
+# `${CLAUDE_PLUGIN_ROOT}/.venv/bin/fundora-prospect-mcp`, or `.venv` n'est pas
+# versionne : une fois le plugin installe ailleurs que dans le depot, ce chemin
+# ne resout pas. Meme famille de defaut que le `FileNotFoundError` sur la
+# grille de ponderation en Phase 4 — un chemin qui ne marche que dans
+# l'environnement de developpement.
+#
+# Le fait qui simplifie tout : LE PLUGIN EMBARQUE SON PROPRE CODE SOURCE. Le
+# paquet n'a jamais besoin d'etre installe, il suffit d'ajouter `src` au
+# PYTHONPATH. Le probleme se reduit donc a trouver un interpreteur qui possede
+# les trois dependances d'execution : httpx, pydantic, mcp.
+#
+# La racine se resout depuis l'emplacement de CE script, pas depuis
+# CLAUDE_PLUGIN_ROOT — ce qui le rend fonctionnel meme quand la variable n'est
+# pas definie, notamment quand `.mcp.json` est relu comme configuration de
+# projet.
+
+set -e
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+CHEMIN_SRC="$ROOT/src"
+
+# Un interpreteur convient s'il importe le paquet ET ses trois dependances.
+convient() {
+    [ -n "$1" ] || return 1
+    PYTHONPATH="$CHEMIN_SRC${PYTHONPATH:+:$PYTHONPATH}" \
+        "$1" -c 'import fundora_prospect, httpx, pydantic, mcp' >/dev/null 2>&1
+}
+
+trouver_interprete() {
+    # 1. Surcharge explicite — echappatoire operationnelle, et point d'entree
+    #    des tests.
+    if [ -n "${FUNDORA_PYTHON:-}" ]; then
+        if convient "$FUNDORA_PYTHON"; then
+            echo "$FUNDORA_PYTHON"
+            return 0
+        fi
+        return 1
+    fi
+
+    # 2. Venv du depot, s'il existe. Confort de developpement, jamais requis.
+    if [ -x "$ROOT/.venv/bin/python" ] && convient "$ROOT/.venv/bin/python"; then
+        echo "$ROOT/.venv/bin/python"
+        return 0
+    fi
+
+    # 3. Premier interpreteur du PATH qui possede les dependances.
+    for candidat in python3.13 python3.12 python3.11 python3 python; do
+        chemin=$(command -v "$candidat" 2>/dev/null) || continue
+        if convient "$chemin"; then
+            echo "$chemin"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+if ! PYTHON=$(trouver_interprete); then
+    # Un echec qui s'explique vaut mieux qu'un venv cree en douce au demarrage
+    # d'un serveur MCP.
+    cat >&2 <<MESSAGE
+
+  fundora-prospect : aucun interpreteur Python utilisable.
+
+  Il faut un Python 3.11+ disposant de trois paquets : httpx, pydantic, mcp.
+  Le code du plugin, lui, est deja present — il n'a pas besoin d'etre installe.
+
+  Pour reparer, au choix :
+
+    python3 -m pip install --user httpx pydantic 'mcp>=2.0'
+
+  ou, en creant un environnement dedie a la racine du plugin :
+
+    python3 -m venv "$ROOT/.venv"
+    "$ROOT/.venv/bin/pip" install -e "$ROOT"
+
+  ou en designant un interpreteur qui les possede deja :
+
+    FUNDORA_PYTHON=/chemin/vers/python
+
+MESSAGE
+    exit 1
+fi
+
+PYTHONPATH="$CHEMIN_SRC${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH
+exec "$PYTHON" -m fundora_prospect.mcp_server "$@"

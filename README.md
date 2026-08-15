@@ -322,6 +322,7 @@ ne serait jamais enrichie, donc jamais rendue. Un test le vérifie.
 .mcp.json                           declaration du serveur MCP
 hooks/hooks.json                    hook PreToolUse
 hooks/whitelist_domaines.py         le garde-fou
+bin/fundora-prospect-mcp            lanceur, sans hypothese de venv
 skills/scan-liquidity-events/       « trouve-moi les cessions… »
 skills/score-lead/                  « pourquoi ce lead a-t-il ce score ? »
 ```
@@ -330,6 +331,31 @@ skills/score-lead/                  « pourquoi ce lead a-t-il ce score ? »
 placer est l'erreur la plus fréquente, et elle échoue silencieusement : le
 plugin se charge, les compétences sont ignorées. Un test le vérifie plutôt
 qu'une relecture.
+
+### Installation
+
+```
+/plugin marketplace add ethanlaloum/fundora-prospect
+/plugin install fundora-prospect@fundora
+```
+
+La source est le dépôt git, pas un chemin local : Claude Code le clone, donc
+seuls les fichiers versionnés sont copiés. Un chemin local ferait une copie
+brute du répertoire — `.venv` compris, soit 90 Mo d'environnement virtuel dont
+les scripts pointeraient vers l'interpréteur de la machine d'origine.
+
+Le serveur MCP est lancé par `bin/fundora-prospect-mcp`, un script versionné
+qui **ne suppose aucun environnement virtuel**. Le plugin embarque son code
+source : le paquet n'a pas besoin d'être installé, il suffit d'un Python 3.11+
+disposant de `httpx`, `pydantic` et `mcp`. Le script les cherche dans cet
+ordre — `$FUNDORA_PYTHON`, le venv du dépôt s'il existe, puis le `PATH` — et
+s'il n'en trouve aucun, il sort en nommant la commande de réparation plutôt
+que de mourir en silence sur un « Connection closed ».
+
+Un test lance la commande exacte de `.mcp.json` depuis une copie du plugin
+**privée de `.venv`**, dans un répertoire arbitraire, et exige un vrai
+handshake MCP. C'est la vérification qui manquait quand le chemin de
+configuration a cassé en installation non-éditable.
 
 ### Deux verrous, deux périmètres
 

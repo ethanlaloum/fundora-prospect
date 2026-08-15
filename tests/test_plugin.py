@@ -188,3 +188,121 @@ def test_la_version_est_identique_dans_les_deux_manifestes() -> None:
         (RACINE / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
     )
     assert marketplace["plugins"][0]["version"] == plugin["version"]
+
+
+# --- Lancement du serveur MCP hors du depot -----------------------------------
+
+
+def _copier_plugin_sans_venv(destination: Path) -> Path:
+    """Copie le plugin comme le ferait une installation, MAIS sans `.venv`.
+
+    C'est la situation reelle d'un tiers : le depot versionne ne contient
+    aucun environnement virtuel.
+    """
+    import shutil
+
+    shutil.copytree(
+        RACINE,
+        destination,
+        ignore=shutil.ignore_patterns(
+            ".venv", ".git", "__pycache__", ".pytest_cache", ".ruff_cache"
+        ),
+    )
+    assert not (destination / ".venv").exists()
+    return destination
+
+
+def test_la_commande_de_mcp_json_repond_sans_venv_dans_l_arborescence(tmp_path) -> None:
+    """LE test qui manquait en Phase 4.
+
+    On ne verifie pas qu'un chemin existe : on lance la commande exacte lue
+    dans `.mcp.json`, depuis une copie du plugin PRIVEE de `.venv`, placee
+    dans un repertoire arbitraire — et on exige un vrai handshake MCP.
+
+    Le defaut precedent (`${CLAUDE_PLUGIN_ROOT}/.venv/bin/...`) passait tous
+    les tests de l'epoque et ne resolvait sur aucune machine tierce.
+    """
+    import os
+    import shutil
+    import subprocess
+    import sys
+
+    racine_copie = _copier_plugin_sans_venv(tmp_path / "plugin")
+
+    charge = json.loads((racine_copie / ".mcp.json").read_text(encoding="utf-8"))
+    modele = charge["mcpServers"]["fundora-prospect"]["command"]
+    commande = modele.replace("${CLAUDE_PLUGIN_ROOT}", str(racine_copie))
+    assert Path(commande).is_file(), f"{commande} n'existe pas dans la copie"
+
+    # `FUNDORA_PYTHON` designe l'interpreteur qui porte les dependances. Sans
+    # lui, le wrapper chercherait sur le PATH — ce qui marche aussi, mais
+    # dependrait de la machine de test.
+    env = dict(os.environ, FUNDORA_PYTHON=sys.executable)
+    env.pop("PYTHONPATH", None)
+    env.pop("CLAUDE_PLUGIN_ROOT", None)
+
+    poignee = (
+        '{"jsonrpc":"2.0","id":1,"method":"initialize","params":'
+        '{"protocolVersion":"2024-11-05","capabilities":{},'
+        '"clientInfo":{"name":"test","version":"1"}}}\n'
+    )
+    resultat = subprocess.run(
+        [commande],
+        input=poignee,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,  # repertoire arbitraire, sans rapport avec le plugin
+        env=env,
+        timeout=60,
+        check=False,
+    )
+
+    assert '"jsonrpc"' in resultat.stdout, (
+        f"pas de reponse MCP.\nstdout: {resultat.stdout[:400]}\nstderr: {resultat.stderr[:600]}"
+    )
+    reponse = json.loads(resultat.stdout.splitlines()[0])
+    assert reponse["id"] == 1
+    assert "capabilities" in reponse["result"]
+    assert reponse["result"]["serverInfo"]["name"] == "fundora-prospect"
+
+    shutil.rmtree(racine_copie, ignore_errors=True)
+
+
+def test_le_wrapper_echoue_en_nommant_la_reparation(tmp_path) -> None:
+    """Sans interpreteur utilisable, le message doit dire quoi taper.
+
+    Un serveur MCP qui meurt en silence est indiagnosticable depuis Claude
+    Code : on ne voit qu'un « Connection closed ».
+    """
+    import os
+    import subprocess
+
+    faux = tmp_path / "python-sans-dependances"
+    faux.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    faux.chmod(0o755)
+
+    resultat = subprocess.run(
+        [str(RACINE / "bin" / "fundora-prospect-mcp")],
+        input="",
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, FUNDORA_PYTHON=str(faux)),
+        timeout=60,
+        check=False,
+    )
+
+    assert resultat.returncode != 0
+    message = resultat.stderr
+    assert "aucun interpreteur" in message.lower()
+    for attendu in ("httpx", "pydantic", "mcp", "pip install", "FUNDORA_PYTHON"):
+        assert attendu in message, f"le message doit mentionner {attendu!r}"
+
+
+def test_mcp_json_ne_suppose_aucun_venv() -> None:
+    """Garde-fou de regression : le chemin ne doit plus jamais citer `.venv`."""
+    texte = (RACINE / ".mcp.json").read_text(encoding="utf-8")
+    assert ".venv" not in texte, (
+        "`.mcp.json` ne doit pas dependre d'un venv — il n'est pas versionne "
+        "et n'existe pas dans une installation tierce"
+    )
+    assert "bin/fundora-prospect-mcp" in texte
