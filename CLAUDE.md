@@ -433,7 +433,33 @@ Sortie : score 0–100 + détail par critère.
 Gate : tests paramétrés sur les cas limites (prix nul, date future, secteur
 inconnu, montant extrême).
 
-### Phase 3 — Enrichissement + provenance (J2 après-midi)
+### Phase 3 — Enrichissement ✅ FAIT
+
+Périmètre volontairement réduit à **deux signaux** : statut administratif et
+code APE. Pas d'effectif, pas de forme juridique, **pas de dirigeants** — la
+réponse de l'API en contient, ils sont supprimés à la capture et le modèle ne
+peut pas les porter.
+
+**Le statut est une PORTE, pas un poids.** Une société radiée n'est pas « un
+peu moins bonne » : la personne morale n'existe plus, et nous avons décidé de
+ne pas poursuivre les associés. Binaire, donc porte. `statut_diffusion ≠ O`
+ferme aussi — opposition INSEE explicite. Le statut `INCONNU` ne ferme rien :
+un lead sans enrichissement reste un lead valide.
+
+**Le critère secteur reste à poids nul.** Le code APE est disponible, mais
+aucune base ne permet de hiérarchiser les secteurs sans donnée de conversion.
+Les 10 points sont reportés sur la fraîcheur — d'abord parce qu'un score sur
+100 dont le maximum réel serait 90 est un mensonge d'échelle, ensuite parce que
+la fraîcheur est le seul critère dont la pondération soit motivée métier. Ce
+n'est **pas** une amélioration du classement : un poids orphelin a été
+redistribué.
+
+Mesures : sections I 52,4 % / G 21,0 % / C 10,5 % / L 8,6 %. **Section K = 0 %**
+— l'hypothèse d'écarter les véhicules financiers portait sur une population
+inexistante, la règle n'a pas été implémentée. Statuts : 69,7 % actives,
+26,1 % inconnues, 4,2 % cessées.
+
+### Phase 3 bis — Provenance (non faite)
 `enrichment.py` : appel à `recherche-entreprises.api.gouv.fr` par SIREN.
 
 **L'enrichissement n'est pas ce qui crée le lead** — BODACC fournit déjà SIREN

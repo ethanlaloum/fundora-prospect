@@ -38,12 +38,15 @@ plancher_eur = 10_000
 plafond_eur = 1_580_000
 
 [fraicheur]
-poids = 35
+poids = 45
 motif = """
 Le delai est le critere le plus decisif du metier. Une cession de 3 semaines
 et une de 11 mois ne sont pas le meme prospect : dans le premier cas le produit
 est encore en tresorerie et la decision de placement n'est pas prise, dans le
 second l'argent a deja trouve une destination.
+
+45 et non 35 : les 10 points viennent du critere secteur, laisse orphelin
+faute de base defendable pour hierarchiser les activites. Voir [secteur].
 """
 
 # DECROISSANCE DES LE PREMIER JOUR, sans plateau.
@@ -71,17 +74,33 @@ fenetre_nulle_jours = 1096
 # QUALITE DE LA DONNEE, celui-la tranche la PERTINENCE COMMERCIALE.
 
 [secteur]
-poids = 10
+poids = 0
 motif = """
-Certains secteurs cedent a des profils plus proches de l'ICP Fundora.
-INDISPONIBLE avant la Phase 3 : BODACC ne porte aucun code APE ou NAF, et le
-champ `activite` est de la prose libre (264 valeurs distinctes sur 271).
-Le critere rend une contribution neutre en attendant l'enrichissement, avec
-son motif affiche dans le breakdown — un critere silencieusement absent serait
-un trou dans l'explicabilite.
+POIDS NUL. Le code APE est desormais disponible via l'enrichissement, mais
+AUCUNE BASE DEFENDABLE n'existe pour hierarchiser les secteurs : il n'y a pas
+de donnee de conversion. Affirmer que la restauration convertit mieux que le
+BTP serait inventer un signal — exactement ce qui a ete refuse pour le
+departement, et le refuser la puis l'accepter ici serait incoherent.
+
+Pourquoi les 10 points sont reportes, dans cet ordre :
+
+1. Un score sur 100 dont le maximum reel serait 90 est un mensonge d'echelle,
+   c'est-a-dire le defaut d'explicabilite exact que ce projet combat. Un poids
+   orphelin ne peut pas rester en place.
+2. Le report vers la fraicheur est le choix par defaut le moins arbitraire :
+   c'est le seul critere dont la ponderation soit motivee metier.
+
+Ce n'est PAS une amelioration du classement : un poids orphelin a ete
+redistribue, rien n'a ete calibre.
+
+Le code APE reste collecte et affiche — il sert de metadonnee de segmentation,
+et le jour ou un retour de conversion existe, activer ce critere sera une
+modification de ce fichier, pas du code.
+
+Si `codes_prioritaires` est rempli, ce poids doit etre repris a un autre
+critere pour que la somme reste a 100.
 """
 
-# Codes APE prioritaires, a remplir en Phase 3.
 codes_prioritaires = []
 
 [departement]

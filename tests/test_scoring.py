@@ -388,13 +388,13 @@ def test_les_poids_sont_rechargeables_sans_toucher_au_code(
     variante = tmp_path / "ponderation.toml"
     source = GrillePonderation.CHEMIN_DEFAUT.read_text(encoding="utf-8")
     variante.write_text(
-        source.replace("poids = 55", "poids = 40").replace("poids = 35", "poids = 50"),
+        source.replace("poids = 55", "poids = 40").replace("poids = 45", "poids = 60"),
         encoding="utf-8",
     )
 
     rechargee = GrillePonderation.depuis_toml(variante)
     assert rechargee.montant.poids == 40
-    assert rechargee.fraicheur.poids == 50
+    assert rechargee.fraicheur.poids == 60
     assert grille.montant.poids == 55, "la grille par defaut ne doit pas etre affectee"
 
 
@@ -424,3 +424,67 @@ def test_evaluation_est_serialisable(grille: GrillePonderation) -> None:
     assert isinstance(evaluation, Evaluation)
     charge = evaluation.model_dump_json()
     assert "contributions" in charge
+
+
+# --- Porte du statut de la societe cedante ----------------------------------
+
+
+def test_societe_cedante_cessee_est_hors_classement(grille: GrillePonderation) -> None:
+    """Une societe radiee n'est pas « un peu moins bonne » : la personne morale
+    n'existe plus, et nous avons decide de ne pas poursuivre les associes.
+    C'est binaire, donc une porte — un poids laisserait entendre une gradation
+    qui n'existe pas."""
+    from fundora_prospect.models import StatutEntreprise
+
+    event = evenement().model_copy(update={"statut_cedant": StatutEntreprise.CESSEE})
+    evaluation = evaluer(event, grille, aujourdhui=AUJOURDHUI)
+    assert not evaluation.classable
+    assert evaluation.score is None
+    assert "cess" in (evaluation.motif_refus or "").lower()
+
+
+def test_entreprise_non_diffusible_est_hors_classement(grille: GrillePonderation) -> None:
+    from fundora_prospect.models import StatutEntreprise
+
+    event = evenement().model_copy(update={"statut_cedant": StatutEntreprise.NON_DIFFUSIBLE})
+    evaluation = evaluer(event, grille, aujourdhui=AUJOURDHUI)
+    assert not evaluation.classable
+    assert "insee" in (evaluation.motif_refus or "").lower()
+
+
+def test_statut_inconnu_ne_ferme_rien(grille: GrillePonderation) -> None:
+    """Regle de degradation : un lead sans enrichissement reste un lead valide.
+    L'API peut etre muette, ce n'est pas au prospect d'en payer le prix."""
+    from fundora_prospect.models import StatutEntreprise
+
+    event = evenement().model_copy(update={"statut_cedant": StatutEntreprise.INCONNU})
+    evaluation = evaluer(event, grille, aujourdhui=AUJOURDHUI)
+    assert evaluation.classable
+    assert evaluation.score is not None
+
+
+def test_societe_active_est_classable(grille: GrillePonderation) -> None:
+    from fundora_prospect.models import StatutEntreprise
+
+    event = evenement().model_copy(update={"statut_cedant": StatutEntreprise.ACTIVE})
+    assert evaluer(event, grille, aujourdhui=AUJOURDHUI).classable
+
+
+# --- Le poids orphelin du secteur -------------------------------------------
+
+
+def test_le_secteur_est_a_poids_nul_faute_de_base_defendable(
+    grille: GrillePonderation,
+) -> None:
+    """Le code APE est disponible, mais rien ne permet de hierarchiser les
+    secteurs sans donnee de conversion. Meme regle que le departement."""
+    assert grille.secteur.poids == 0
+    assert "defendable" in grille.secteur.motif.lower()
+
+
+def test_le_score_maximal_reste_atteignable(grille: GrillePonderation) -> None:
+    """Un score sur 100 dont le maximum reel serait 90 est un mensonge
+    d'echelle — le defaut d'explicabilite exact que ce projet combat."""
+    parfait = evenement(montant=grille.montant.plafond_eur, date_acte=AUJOURDHUI)
+    evaluation = evaluer(parfait, grille, aujourdhui=AUJOURDHUI)
+    assert evaluation.score == pytest.approx(100.0)

@@ -225,6 +225,24 @@ FEUILLES_PERSONNE_AUTORISEES = frozenset(
     }
 )
 
+# --- Fixtures d'enrichissement (recherche-entreprises) -----------------------
+# Forme differente de BODACC, donc liste de chemins distincte. `dirigeants` et
+# `siege` sont absents PAR CONSTRUCTION : le recorder les supprime a la
+# capture. Ils ne figurent pas ici, donc leur reapparition ferait echouer le
+# test — c'est le comportement voulu.
+CHEMINS_ENRICHISSEMENT_AUTORISES = frozenset(
+    {
+        "results.siren",
+        # Raison sociale : conservee, contrainte 4 l'autorise explicitement.
+        "results.nom_complet",
+        "results.etat_administratif",
+        "results.activite_principale",
+        "results.activite_principale_naf25",
+        "results.section_activite_principale",
+        "results.statut_diffusion",
+    }
+)
+
 PREFIXES_PERSONNE = (
     "listepersonnes.personne",
     "listeprecedentproprietaire.personne",

@@ -23,7 +23,12 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from fundora_prospect.models import ContributionCritere, Evaluation, LiquidityEvent
+from fundora_prospect.models import (
+    ContributionCritere,
+    Evaluation,
+    LiquidityEvent,
+    StatutEntreprise,
+)
 
 CHEMIN_CONFIG = Path(__file__).resolve().parents[2] / "config" / "ponderation.toml"
 
@@ -185,6 +190,21 @@ def normaliser_fraicheur(jours: int, critere: CritereFraicheur) -> float:
 
 def _motif_refus(event: LiquidityEvent) -> str | None:
     """Un evenement peut sortir du classement, jamais y entrer avec un zero."""
+    # Le statut de la societe cedante est une PORTE, pas un poids. Une societe
+    # radiee n'est pas « un peu moins bonne » : la personne morale n'existe
+    # plus, elle ne peut pas etre prospectee, et nous avons decide de ne pas
+    # poursuivre les associes. C'est binaire, donc une porte — un poids
+    # laisserait entendre une gradation qui n'existe pas.
+    #
+    # Le statut INCONNU ne ferme rien : l'API peut etre muette, et un lead sans
+    # enrichissement reste un lead valide.
+    if event.statut_cedant is StatutEntreprise.CESSEE:
+        return (
+            "societe cedante cessee : le produit de cession est descendu aux "
+            "associes, la personne morale n'est plus prospectable"
+        )
+    if event.statut_cedant is StatutEntreprise.NON_DIFFUSIBLE:
+        return "entreprise non diffusible : opposition INSEE explicite, non exploitee"
     if not event.retenu:
         return f"evenement non retenu par le parser (qualification : {event.qualification})"
     if event.aberrant:
@@ -263,8 +283,8 @@ def evaluer(
                 valeur_normalisee=None,
                 points=0.0,
                 motif=(
-                    "code APE non disponible : BODACC n'en porte aucun, "
-                    "l'enrichissement arrive en Phase 3. Contribution neutre."
+                    "code APE non disponible (enrichissement absent ou muet) ; "
+                    f"critere a poids {grille.secteur.poids}, contribution neutre"
                 ),
             )
         )

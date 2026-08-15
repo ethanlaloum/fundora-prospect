@@ -24,6 +24,7 @@ from typing import Any
 import pytest
 
 from tools.vocabulaire import (
+    CHEMINS_ENRICHISSEMENT_AUTORISES,
     CHEMINS_TEXTE_AUTORISES,
     FEUILLES_PERSONNE_AUTORISEES,
     GABARITS,
@@ -65,7 +66,9 @@ def normaliser(chemin: str) -> str:
     return chemin.replace("[]", "")
 
 
-def chemin_autorise(chemin: str) -> bool:
+def chemin_autorise(chemin: str, *, enrichissement: bool = False) -> bool:
+    if enrichissement:
+        return chemin in {normaliser(c) for c in CHEMINS_ENRICHISSEMENT_AUTORISES}
     if chemin in {normaliser(c) for c in CHEMINS_TEXTE_AUTORISES}:
         return True
     for prefixe in PREFIXES_PERSONNE:
@@ -96,10 +99,11 @@ def _identifiants() -> list[str]:
 def test_aucun_chemin_texte_non_declare(nom_fixture: str) -> None:
     """Un champ texte inconnu peut porter des donnees personnelles : on refuse."""
     annonce = dict(charger_fixtures())[nom_fixture]
+    enrichissement = nom_fixture.startswith("enrichissement")
     inconnus = {
         normaliser(chemin)
         for chemin, _ in parcourir(annonce)
-        if not chemin_autorise(normaliser(chemin))
+        if not chemin_autorise(normaliser(chemin), enrichissement=enrichissement)
     }
     assert not inconnus, f"chemins texte non declares dans {nom_fixture} : {sorted(inconnus)}"
 

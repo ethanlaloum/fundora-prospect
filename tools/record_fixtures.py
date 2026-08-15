@@ -214,6 +214,68 @@ def rassembler(client: Any) -> list[dict[str, Any]]:
     return list(vivier.values())
 
 
+# --- Enrichissement : capture des reponses recherche-entreprises -------------
+
+RECHERCHE_ENTREPRISES = "https://recherche-entreprises.api.gouv.fr/search"
+
+# La reponse porte `dirigeants` (noms, prenoms, annees de naissance) et `siege`
+# (adresse complete). Ces champs sont HORS PERIMETRE et sont des donnees
+# personnelles : ils sont SUPPRIMES a la capture, pas substitues. On ne stocke
+# pas ce qu'on n'utilise pas — c'est plus fort qu'anonymiser.
+CLES_ENRICHISSEMENT_CONSERVEES = (
+    "siren",
+    "nom_complet",
+    "etat_administratif",
+    "activite_principale",
+    "activite_principale_naf25",
+    "section_activite_principale",
+    "statut_diffusion",
+)
+
+
+def projeter_enrichissement(charge: dict[str, Any]) -> dict[str, Any]:
+    """Ne garde que les cles utiles. Tout le reste est jete des la capture."""
+    resultats = [
+        {cle: r.get(cle) for cle in CLES_ENRICHISSEMENT_CONSERVEES if r.get(cle) is not None}
+        for r in charge.get("results", [])
+    ]
+    return {"total_results": charge.get("total_results", 0), "results": resultats}
+
+
+def capturer_enrichissements(client: Any, sirens: list[str]) -> int:
+    captures: list[dict[str, Any]] = []
+    for siren in sirens:
+        reponse = client.get(RECHERCHE_ENTREPRISES, params={"q": siren, "per_page": 1})
+        if reponse.status_code != 200:
+            continue
+        captures.append(projeter_enrichissement(reponse.json()))
+    # Cas limite indispensable : un SIREN sans correspondance.
+    reponse = client.get(RECHERCHE_ENTREPRISES, params={"q": "000000000", "per_page": 1})
+    if reponse.status_code == 200:
+        captures.append(projeter_enrichissement(reponse.json()))
+
+    (FIXTURES / "enrichissement_reponses.json").write_text(
+        json.dumps(captures, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return len(captures)
+
+
+def sirens_des_fixtures() -> list[str]:
+    """Les SIREN de cedants deja presents dans les fixtures BODACC."""
+    trouves: list[str] = []
+    for fichier in sorted(FIXTURES.glob("*.json")):
+        if fichier.name.startswith("enrichissement"):
+            continue
+        for rec in json.loads(fichier.read_text(encoding="utf-8")):
+            for personne in personnes_precedentes(rec):
+                immat = personne.get("numeroImmatriculation") or {}
+                brut = str(immat.get("numeroIdentification") or "")
+                compact = "".join(brut.split())
+                if len(compact) == 9 and compact.isdigit() and compact not in trouves:
+                    trouves.append(compact)
+    return trouves
+
+
 def main() -> int:
     FIXTURES.mkdir(parents=True, exist_ok=True)
     with creer_client() as client:
@@ -235,6 +297,12 @@ def main() -> int:
 
     print(f"\n{total} fixtures ecrites dans {FIXTURES}")
     print("Gabarits declares :", ", ".join(sorted(GABARITS)))
+
+    sirens = sirens_des_fixtures()[:6]
+    with creer_client() as client:
+        nombre = capturer_enrichissements(client, sirens)
+    print(f"\nenrichissement : {nombre} reponses capturees ({len(sirens)} SIREN + 1 introuvable)")
+    print("  `dirigeants` et `siege` supprimes a la capture, jamais ecrits")
     return 0
 
 

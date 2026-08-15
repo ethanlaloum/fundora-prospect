@@ -1,0 +1,90 @@
+[
+  {
+    "total_results": 1,
+    "results": [
+      {
+        "siren": "852872563",
+        "nom_complet": "LE FOURNIL D ORNELLA",
+        "etat_administratif": "A",
+        "activite_principale": "10.71C",
+        "activite_principale_naf25": "10.71H",
+        "section_activite_principale": "C",
+        "statut_diffusion": "O"
+      }
+    ]
+  },
+  {
+    "total_results": 1,
+    "results": [
+      {
+        "siren": "415126374",
+        "nom_complet": "SOCIETE DISTRIBUTION VINS ET CHAMPAGNE (SDVC)",
+        "etat_administratif": "A",
+        "activite_principale": "46.34Z",
+        "activite_principale_naf25": "46.34Y",
+        "section_activite_principale": "G",
+        "statut_diffusion": "O"
+      }
+    ]
+  },
+  {
+    "total_results": 1,
+    "results": [
+      {
+        "siren": "832611677",
+        "nom_complet": "CHEZ GAYANE (CHEZ GAYANE)",
+        "etat_administratif": "A",
+        "activite_principale": "47.21Z",
+        "activite_principale_naf25": "47.21Y",
+        "section_activite_principale": "G",
+        "statut_diffusion": "O"
+      }
+    ]
+  },
+  {
+    "total_results": 1,
+    "results": [
+      {
+        "siren": "325662559",
+        "nom_complet": "MICHEL NOUVEAU (PODIUM EVASION)",
+        "etat_administratif": "C",
+        "activite_principale": "77.39Z",
+        "activite_principale_naf25": "77.39Y",
+        "section_activite_principale": "N",
+        "statut_diffusion": "O"
+      }
+    ]
+  },
+  {
+    "total_results": 1,
+    "results": [
+      {
+        "siren": "450267489",
+        "nom_complet": "ALAIN BRUNO",
+        "etat_administratif": "C",
+        "activite_principale": "10.71C",
+        "activite_principale_naf25": "10.71H",
+        "section_activite_principale": "C",
+        "statut_diffusion": "O"
+      }
+    ]
+  },
+  {
+    "total_results": 1,
+    "results": [
+      {
+        "siren": "412452724",
+        "nom_complet": "PASCAL PELICOT",
+        "etat_administratif": "A",
+        "activite_principale": "71.12B",
+        "activite_principale_naf25": "71.12Y",
+        "section_activite_principale": "M",
+        "statut_diffusion": "O"
+      }
+    ]
+  },
+  {
+    "total_results": 0,
+    "results": []
+  }
+]

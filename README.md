@@ -1,3 +1,4 @@
+
 # fundora-prospect
 
 **Aucun scraping.** Ce projet n'exploite que des publications légales
@@ -36,8 +37,9 @@ C'est un signal de liquidité daté, nominatif et public.
 2. Le prix révèle une trésorerie fraîche, à une date connue.
 3. Le cédant est, dans deux tiers des cas, **une société** — le produit de
    cession arrive sur son compte et y reste tant qu'elle n'est pas liquidée.
-4. Une société qui vient d'encaisser plusieurs centaines de milliers d'euros et
-   n'a pas encore arbitré est l'ICP de Fundora.
+4. Une société qui vient d'encaisser plusieurs centaines de milliers d'euros,
+   **toujours active**, et qui n'a pas encore arbitré est l'ICP de Fundora.
+   Radiée, le cash est descendu aux associés : ce n'est plus un prospect.
 5. L'annonce fournit nativement le SIREN du cédant et l'URL de publication :
    la traçabilité est un champ, pas une reconstruction.
 
@@ -106,15 +108,21 @@ LiquidityEvent  A20260153319
   cédant        LE FOURNIL D ORNELLA  (personne morale, SIREN 852872563)
   montant       185 000 EUR                    qualification : achat
   acte          2026-07-25   parution 2026-08-13   écart 19 jours
+  statut        ACTIVE — société active, trésorerie de cession au bilan
+  activité      APE 10.71C   section C
   provenance    https://www.bodacc.fr/...?q.id=id:A20260153319
 
-Score 63,98 / 100
+Score 73,20 / 100
   montant       31,70 pts   185 000 EUR, échelle log entre 10 000 et 1 580 000 EUR
-  fraîcheur     32,28 pts   21 jours depuis la date d'acte ; décroissance demi-vie
+  fraîcheur     41,50 pts   21 jours depuis la date d'acte ; décroissance demi-vie
                             dès le premier jour, demi-vie 180 jours
-  secteur        0,00 pts   code APE non disponible, enrichissement à venir
+  secteur        0,00 pts   code APE 10.71C hors liste prioritaire ; poids 0
   département    0,00 pts   département 13 ; poids 0 — périmètre PACA homogène
 ```
+
+Le statut `ACTIVE` est ce qui autorise ce lead à être classé : une société
+radiée sort du classement avec son motif, parce que son produit de cession est
+déjà descendu aux associés.
 
 Chaque point est justifié, y compris les critères qui ne rapportent rien. Aucun
 score ne sort sans son détail, et `somme(contributions) == score` est vérifié
@@ -212,6 +220,8 @@ une case à cocher en fin de projet, c'est une contrainte d'architecture.
 | Zéro donnée personnelle au dépôt | Liste blanche + substitution à la capture + hook `pre-commit` | `tests/test_anonymisation.py` |
 | Base légale par segment | `type_personne` porté jusqu'au lead, jamais dans le score | `tests/test_bodacc.py` |
 | Scoring explicable | `somme(contributions) == score`, motif obligatoire par critère | `tests/test_scoring.py` |
+| Opposition INSEE respectée | `statut_diffusion ≠ O` ⇒ lead écarté avec motif | `tests/test_enrichment.py` |
+| Pas de données hors périmètre | `dirigeants` supprimé à la capture, absent du modèle | `tests/test_enrichment.py` |
 
 La whitelist est vérifiée au **transport HTTP** et non dans une fonction
 utilitaire : à cet endroit, aucun chemin de code ne peut l'éviter — ni une
@@ -239,6 +249,11 @@ l'enrichissement.
         │          → apport (montant évalué)      : rejeté, règle métier
         │          → francs / FRF                 : rejeté, devise obsolète
         │          → acte de plus de 24 mois      : rejeté, qualité de donnée
+        ▼
+  enrichment.py    recherche-entreprises, par SIREN — DEUX signaux
+        │          → societe cessee            : hors classement (porte)
+        │          → non diffusible INSEE      : hors classement (porte)
+        │          → API muette                : lead VALIDE, statut inconnu
         ▼
   models.py        LiquidityEvent — le fait, avec sa provenance
         │
@@ -325,6 +340,7 @@ sur 505 événements classables :
 |---|---|
 | Plateau 0–18 mois *(version initiale)* | **0,998** |
 | Décroissance dès le premier jour, demi-vie 180 jours | **0,790** |
+| Idem, après report du poids orphelin du secteur (35 → 45) | **0,710** |
 
 La première version accordait une contribution pleine jusqu'à 18 mois. C'était
 une *fenêtre de pertinence commerciale* là où il fallait un *critère de
@@ -334,7 +350,10 @@ alors qu'une fonction monotone du montant.
 
 La correction — décroissance dès le premier jour — fait tomber la corrélation
 à 0,790, et **19,2 % des paires sont désormais classées différemment d'un tri
-par montant**. Un test le vérifie directement : une cession de 250 k€ vieille
+par montant**. La valeur descend ensuite à 0,710, mécaniquement : les 10 points
+du critère secteur, laissé orphelin faute de base défendable, ont été reportés
+sur la fraîcheur. **Ce n'est pas une amélioration du classement** — un poids
+sans emploi a été redistribué, rien n'a été calibré. Un test le vérifie directement : une cession de 250 k€ vieille
 de deux semaines passe devant une cession de 600 k€ vieille de vingt-deux mois.
 
 La leçon vaut au-delà de ce projet : **un critère peut être correctement
@@ -346,15 +365,68 @@ population réelle.** La pondération n'était jamais en cause.
 comparable. Le seuil d'alerte de la configuration déclenche un avertissement,
 pas un échec — on ne retouche pas des poids pour faire passer un test.
 
-### Le critère secteur est inactif
+### Le critère secteur reste à poids nul — pour une autre raison qu'avant
 
-BODACC ne porte **aucun code APE ou NAF** — inventaire des 32 champs de premier
-niveau et de toutes les clés imbriquées. Le champ `activite` est de la prose
-libre : 264 valeurs distinctes sur 271, jusqu'à 908 caractères.
+Le code APE est désormais disponible : l'enrichissement le récupère, il est
+stocké et affiché. Le critère n'est plus bloqué techniquement.
 
-Le critère est donc déclaré mais rend une contribution nulle, avec son motif
-affiché dans le breakdown. Un critère silencieusement absent serait un trou
-dans l'explicabilité. Il s'activera avec l'enrichissement.
+**Il reste à poids nul parce qu'aucune base ne permet de hiérarchiser les
+secteurs.** Il n'existe pas de donnée de conversion. Affirmer que la
+restauration convertit mieux que le BTP serait inventer un signal — exactement
+ce qui a été refusé pour le département, et l'accepter ici serait incohérent.
+
+La distribution mesurée montre que l'enjeu est de toute façon faible. Sur 105
+cédants personnes morales enrichis :
+
+| Section APE | Part |
+|---|---|
+| I — Hébergement et restauration | 52,4 % |
+| G — Commerce | 21,0 % |
+| C — Industrie manufacturière | 10,5 % |
+| L — Activités immobilières | 8,6 % |
+| autres (F, S, J, M, N, R) | 7,5 % |
+
+Deux sections font 73 % du flux. Une pondération sectorielle reviendrait pour
+l'essentiel à trancher « restauration contre le reste », sans rien pour
+l'étayer.
+
+**Une hypothèse de départ s'est révélée fausse**, et c'est ce à quoi sert une
+mesure : je supposais qu'il faudrait écarter les cédants de la **section K
+(activités financières)**, véhicules déjà accompagnés et hors ICP. Mesure :
+**K représente 0 % du flux.** Les 8,6 % que je pensais y trouver sont en
+section L (immobilier), pour laquelle l'argument « professionnel de la
+finance » ne tient pas. La règle n'a pas été implémentée.
+
+Si une hiérarchie sectorielle devait exister un jour, elle porterait sur la
+**section** — 21 valeurs, seul niveau qu'un humain puisse défendre, et le seul
+stable à travers la révision de nomenclature ci-dessous.
+
+### Une transition de nomenclature NAF est en cours
+
+L'API sert deux codes d'activité pour la même entreprise :
+
+```
+activite_principale        = "10.71C"   NAF rév. 2
+activite_principale_naf25  = "10.71H"   NAF 2025
+```
+
+Les deux sont conservés côte à côte plutôt que d'en choisir un. Aucune
+pondération ne repose sur un code d'activité, donc rien ne casse aujourd'hui —
+mais toute liste de codes écrite en dur sur NAF rév. 2 se périmerait. Les
+sections (lettres A–U) survivent à la révision, pas les sous-classes.
+
+### Un quart des enrichissements n'aboutit pas
+
+Sur 142 cédants personnes morales disposant d'un SIREN, **26,1 % ressortent
+avec un statut inconnu** : l'API ne trouve pas l'entreprise, ou rend une
+entreprise dont le SIREN ne correspond pas à celui demandé — un contrôle
+explicite rejette ce second cas plutôt que d'enrichir un lead avec le statut
+d'une société sans rapport.
+
+Ces leads restent valides et classables, avec le motif dans le breakdown. Mais
+pour un quart du flux, la question « la société est-elle encore active ? » reste
+sans réponse. À l'autre bout, **4,2 % des cédants sont déjà radiés** et sortent
+du classement : peu de volume, mais ce sont exactement les bons à retirer.
 
 ---
 
@@ -368,7 +440,7 @@ git config core.hooksPath .githooks     # active le garde-fou RGPD
 
 | Commande | Ce qu'elle produit |
 |---|---|
-| `.venv/bin/python -m pytest -q` | 254 tests unitaires, sur fixtures figées, sans réseau |
+| `.venv/bin/python -m pytest -q` | 302 tests unitaires, sur fixtures figées, sans réseau |
 | `.venv/bin/python -m pytest -m network -q -s` | volume annuel, taux de parsing par segment, corrélation de rang |
 | `.venv/bin/python explore/dump_bodacc.py` | structure de la donnée, taux de présence du prix |
 | `.venv/bin/python explore/probe_origine_fonds.py` | les montants en francs, les annonces multi-établissements |
@@ -385,11 +457,8 @@ stables, les décimales ne le sont pas.
 
 ## Suite prévue
 
-Enrichissement par SIREN via `recherche-entreprises.api.gouv.fr` — dont le
-signal le plus utile : **la société cédante est-elle toujours active ?** Active,
-la trésorerie est encore au bilan ; radiée, le cash est descendu aux associés
-et le prospect n'est plus le même. Puis exposition en serveur MCP, et
-packaging en plugin Claude Code avec un hook `PreToolUse` bloquant les appels
-hors whitelist.
+Exposition en serveur MCP, puis packaging en plugin Claude Code avec un hook
+`PreToolUse` bloquant les appels hors whitelist — un second verrou, au niveau
+de l'agent, complémentaire de celui posé au transport HTTP.
 
 Rien de tout cela n'existe à ce jour. Ce README ne décrit que ce qui tourne.

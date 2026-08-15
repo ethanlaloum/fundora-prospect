@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import date
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,6 +26,25 @@ class TypeCedant(StrEnum):
 
     PERSONNE_MORALE = "pm"
     PERSONNE_PHYSIQUE = "pp"
+    INCONNU = "inconnu"
+
+
+class StatutEntreprise(StrEnum):
+    """Statut administratif de la societe cedante.
+
+    Le signal le plus decisif de l'enrichissement. **Active** : la tresorerie
+    de cession est encore au bilan, c'est le prospect. **Cessee** : le cash est
+    descendu aux associes, la personne morale n'existe plus — et nous avons
+    decide de ne pas poursuivre les associes, donc ce n'est pas un prospect
+    degrade, c'est un non-prospect.
+
+    `INCONNU` couvre l'API muette, le SIREN absent ou mal forme : le lead reste
+    valide, avec le motif dans le breakdown.
+    """
+
+    ACTIVE = "active"
+    CESSEE = "cessee"
+    NON_DIFFUSIBLE = "non_diffusible"
     INCONNU = "inconnu"
 
 
@@ -45,9 +65,12 @@ class LiquidityEvent(BaseModel):
     retenu: bool
     aberrant: bool = False
 
-    # Renseigne par l'enrichissement en Phase 3 : BODACC ne porte aucun code
-    # d'activite normalise.
+    # Renseignes par l'enrichissement : BODACC ne porte ni code d'activite
+    # normalise ni statut administratif.
     code_ape: str | None = None
+    section_ape: str | None = None
+    statut_cedant: StatutEntreprise = StatutEntreprise.INCONNU
+    motif_enrichissement: str = "enrichissement non effectue"
 
     cedant_denomination: str | None = None
     cedant_type: TypeCedant = TypeCedant.INCONNU
@@ -55,7 +78,9 @@ class LiquidityEvent(BaseModel):
     cedant_indivision: bool = False
 
     @classmethod
-    def depuis_annonce(cls, annonce: Annonce) -> LiquidityEvent:
+    def depuis_annonce(cls, annonce: Annonce, enrichissement: Any = None) -> LiquidityEvent:
+        """L'enrichissement est OPTIONNEL : sans lui le lead reste valide, avec
+        son motif. C'est la regle de degradation."""
         try:
             type_cedant = TypeCedant(annonce.cedant.type_personne)
         except ValueError:
@@ -76,6 +101,10 @@ class LiquidityEvent(BaseModel):
             cedant_type=type_cedant,
             cedant_siren=annonce.cedant.siren,
             cedant_indivision=annonce.cedant.indivision,
+            code_ape=getattr(enrichissement, "code_ape", None),
+            section_ape=getattr(enrichissement, "section_ape", None),
+            statut_cedant=getattr(enrichissement, "statut", StatutEntreprise.INCONNU),
+            motif_enrichissement=getattr(enrichissement, "motif", "enrichissement non effectue"),
         )
 
 
