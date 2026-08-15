@@ -71,9 +71,33 @@ Croisement prix × type de cédant :
 
 | Cédant | Annonces | Prix extrait | > 200 k€ | Extrapolé /an PACA |
 |---|---|---|---|---|
-| Personne morale | 805 (67 %) | 803 | 240 | ~1 046 |
+| Personne morale | 805 (67 %) | 803 | 240 | **~900** |
 | Personne physique | 236 (20 %) | 223 | 36 | ~135 |
-| Absent | 159 (13 %) | 6 | — | exclu |
+| Absent | 159 (13 %) | 6 | 3 | exclu |
+| **Tous cédants** | 1 200 | 1 032 | **279** | **~1 046** |
+
+### Attribution du volume — à ne pas se tromper
+
+Le chiffre de **~1 046/an** compte **tous les cédants confondus**. Les cédants
+personne morale en representent 86 % (240/279), soit **~900/an avant toute
+exclusion de qualite**.
+
+Le volume final mesure en Phase 1 est de **~895/an**. La difference se
+decompose ainsi :
+
+| Etape | Volume | Cause |
+|---|---|---|
+| Tous cédants > 200 k€ | ~1 046 | — |
+| Recentrage sur les personnes morales | ~900 | **décision de cible** |
+| Exclusion apports, devises obsolètes, actes anciens | ~895 | qualité de donnée |
+
+**L'essentiel de la baisse vient du recentrage sur la cible, pas des filtres
+de qualité** — ceux-ci retirent environ 5 leads. Formuler l'inverse
+attribuerait au parser un effet qui appartient a l'arbitrage commercial.
+
+Formulation correcte pour le README : « ~895 cessions de plus de 200 k€ par an
+en PACA avec un cédant personne morale, sur ~1 046 cessions de plus de 200 k€
+tous cédants confondus. »
 
 `url_complete` fournit l'URL de publication par annonce : la contrainte de
 traçabilité est satisfiable nativement, sans reconstruction d'URL.
@@ -109,6 +133,19 @@ seuil de 24 mois.
 
 « prix stipulé » contre « montant évalué ». Le discriminant est fiable, pas
 heuristique. Voir la règle métier associée en Contrainte 6.
+
+**Aucun code d'activité normalisé dans BODACC.** Inventaire des 32 champs de
+premier niveau et de toutes les clés imbriquées : pas de NAF, pas d'APE.
+`region_code` est un code région INSEE, `codeRCS` vaut littéralement « RCS ».
+Zéro des 271 valeurs d'`activite` contient un motif NAF.
+
+`listeetablissements.etablissement.activite` est de la prose libre : **264
+valeurs distinctes sur 271**, jusqu'à 908 caractères. Un lexique de validation
+sur un champ pareil serait une liste ouverte, donc une liste noire déguisée —
+exactement ce que la contrainte 4 interdit. Le champ est donc **substitué dans
+les fixtures**, et le critère secteur du scoring sera keyé sur le **code APE
+obtenu via `recherche-entreprises.api.gouv.fr` en Phase 3**, nomenclature
+fermée et validable.
 
 **3. Les annonces multi-établissements sont négligeables : 0,1 %.**
 
@@ -262,12 +299,34 @@ Gate : tests unitaires sur fixtures + 1 test réseau. Taux de parsing mesuré et
 affiché **par segment**, et taux de rejet ventilé par motif. Référence à battre
 sur le sous-ensemble cédant personne morale : **99,8 %**.
 
-### Phase 2 — Modèle et scoring (J2 matin)
+### Phase 2 — Modèle et grille de pondération (J2 matin)
+
+**Ce n'est pas un modèle. C'est une grille de pondération à dire d'expert.**
+Aucune donnée de conversion n'existe pour la calibrer : les poids sont des
+hypothèses commerciales, pas des coefficients appris. Le vocabulaire du code et
+de la documentation doit le dire — `GrillePonderation`, jamais `model`,
+`predict` ou `training`. Une grille présentée comme un modèle laisse croire à
+une validation empirique qui n'a pas eu lieu, et c'est indéfendable devant un
+CIF.
+
+Les poids vivent dans un **fichier de configuration séparé**, rechargeable sans
+toucher au code : ils seront recalibrés dès qu'un retour commercial existera,
+et ça ne doit pas être une modification de `scoring.py`.
+
+**Test de corrélation de rang obligatoire.** Sur une population déjà filtrée à
+plus de 200 k€, le montant risque d'écraser les autres critères. Un test
+compare le classement produit par la grille complète au classement par montant
+seul (corrélation de Spearman). **Au-delà de 0,90, la grille est un tri par
+prix déguisé** et les pondérations sont à revoir — le test échoue.
+
 `models.py` : `LiquidityEvent`, `Lead`, `ScoreBreakdown` (pydantic).
 `scoring.py` : fonction pure et déterministe. Critères :
 - montant de cession (pondération forte, plafonnée)
 - fraîcheur : fenêtre 0–18 mois, décroissance au-delà
-- secteur d'activité
+- secteur d'activité — **keyé sur le code APE, indisponible avant la Phase 3**.
+  Le critère existe dans la grille dès la Phase 2 mais rend une contribution
+  neutre, avec le motif « APE non disponible » affiché dans le breakdown. Un
+  critère silencieusement absent est un trou dans l'explicabilité.
 - département
 
 **La fraîcheur se calcule depuis la date de l'ACTE, pas depuis la parution.**

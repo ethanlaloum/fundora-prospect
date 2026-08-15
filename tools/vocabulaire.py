@@ -31,6 +31,11 @@ PAYS = ("Paystest",)
 NATIONALITES = ("Nationalitetest",)
 # Une enseigne peut etre un nom de personne (« Chez Michel ») : substituee.
 ENSEIGNES = ("ENSEIGNETEST",)
+# `activite` est de la prose libre : 264 valeurs distinctes sur 271, jusqu'a
+# 908 caracteres. Aucun lexique ne peut la valider sans devenir une liste
+# ouverte, donc une liste noire deguisee. Elle est substituee, et le critere
+# secteur du scoring sera keye sur le code APE recupere en Phase 3.
+ACTIVITES = ("Activitetest",)
 
 # Regroupement par champ terminal : le recorder pioche dedans, le test verifie
 # l'appartenance.
@@ -47,6 +52,7 @@ VALEURS_AUTORISEES: dict[str, tuple[str, ...]] = {
     "pays": PAYS,
     "nationalite": NATIONALITES,
     "enseigne": ENSEIGNES,
+    "activite": ACTIVITES,
 }
 
 # --- Gabarits des champs a texte libre ---------------------------------------
