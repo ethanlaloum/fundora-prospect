@@ -1,0 +1,17 @@
+{
+  "name": "fundora",
+  "description": "Marketplace local du plugin fundora-prospect. Le depot EST le plugin : la source pointe sur sa propre racine.",
+  "owner": {
+    "name": "Ethan Laloum"
+  },
+  "plugins": [
+    {
+      "name": "fundora-prospect",
+      "description": "Detection et qualification de prospects investisseurs a partir des publications legales du BODACC. Aucun scraping : deux APIs publiques francaises, whitelist appliquee au transport HTTP et par un hook PreToolUse.",
+      "source": ".",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": ["bodacc", "prospection", "open-data", "rgpd", "mcp"]
+    }
+  ]
+}

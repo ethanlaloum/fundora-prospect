@@ -22,11 +22,33 @@ RACINE = Path(__file__).resolve().parents[1]
 # --- Le piege d'arborescence ---------------------------------------------------
 
 
-def test_plugin_json_est_le_seul_fichier_dans_claude_plugin() -> None:
-    contenu = sorted(p.name for p in (RACINE / ".claude-plugin").iterdir())
-    assert contenu == ["plugin.json"], (
-        f"`.claude-plugin/` ne doit contenir QUE plugin.json, trouve : {contenu}. "
-        "skills/, hooks/ et agents/ vont a la racine du plugin."
+# Les deux seuls manifestes qui ont leur place dans `.claude-plugin/`.
+# `marketplace.json` s'y ajoute parce que le depot est son propre marketplace :
+# `/plugin install <chemin>` n'existe pas, l'installation passe forcement par
+# `/plugin marketplace add`.
+MANIFESTES_AUTORISES = {"plugin.json", "marketplace.json"}
+
+# Ce qui ne doit JAMAIS s'y trouver. C'est le vrai piege : place ici, le
+# contenu est ignore en silence — le plugin se charge, les competences non.
+DOSSIERS_INTERDITS_DANS_CLAUDE_PLUGIN = ("skills", "hooks", "agents", "commands")
+
+
+def test_claude_plugin_ne_contient_que_des_manifestes() -> None:
+    contenu = {p.name for p in (RACINE / ".claude-plugin").iterdir()}
+    intrus = contenu - MANIFESTES_AUTORISES
+    assert not intrus, (
+        f"`.claude-plugin/` ne doit contenir que {sorted(MANIFESTES_AUTORISES)}, "
+        f"trouve en plus : {sorted(intrus)}"
+    )
+    assert "plugin.json" in contenu
+
+
+@pytest.mark.parametrize("interdit", DOSSIERS_INTERDITS_DANS_CLAUDE_PLUGIN)
+def test_aucun_dossier_de_composants_dans_claude_plugin(interdit: str) -> None:
+    """L'erreur la plus frequente, et elle echoue SILENCIEUSEMENT."""
+    assert not (RACINE / ".claude-plugin" / interdit).exists(), (
+        f"{interdit}/ est dans .claude-plugin/ — il doit etre a la RACINE du plugin. "
+        "Place ici, il est ignore sans message d'erreur."
     )
 
 
@@ -129,3 +151,40 @@ def test_la_demo_est_une_seule_commande_executable() -> None:
     # Les trois actes : le pipeline, le hook, le transport.
     assert "ACTE 1" in texte and "ACTE 2" in texte and "ACTE 3" in texte
     assert "linkedin" in texte.lower(), "le domaine de demo doit etre evocateur"
+
+
+# --- Marketplace ---------------------------------------------------------------
+
+
+def test_marketplace_json_est_valide() -> None:
+    charge = json.loads(
+        (RACINE / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+    )
+    assert charge["name"] == "fundora"
+    assert charge["owner"]["name"]
+    assert len(charge["plugins"]) == 1
+
+
+def test_le_marketplace_pointe_la_racine_du_depot() -> None:
+    """Le depot EST le plugin : la source pointe sur sa propre racine."""
+    charge = json.loads(
+        (RACINE / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+    )
+    assert charge["plugins"][0]["source"] == "."
+
+
+def test_le_nom_du_plugin_est_identique_dans_les_deux_manifestes() -> None:
+    """Une divergence rendrait `plugin install <nom>@fundora` introuvable."""
+    plugin = json.loads((RACINE / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    marketplace = json.loads(
+        (RACINE / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+    )
+    assert marketplace["plugins"][0]["name"] == plugin["name"]
+
+
+def test_la_version_est_identique_dans_les_deux_manifestes() -> None:
+    plugin = json.loads((RACINE / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    marketplace = json.loads(
+        (RACINE / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
+    )
+    assert marketplace["plugins"][0]["version"] == plugin["version"]
