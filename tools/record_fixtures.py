@@ -172,6 +172,14 @@ CAS: dict[str, Any] = {
     "format_nombre_exotique": lambda r: any(
         re.search(r"\d+[.\s]\d{3}[,.]\d{2}", o) for o in origines(r)
     ),
+    # Cas MODAL en production, et pourtant le dernier couvert : une annonce
+    # recente dont l'acte est datable. Sans lui, le garde de fraicheur et le
+    # calcul de l'ecart acte -> parution ne sont jamais exerces de bout en bout.
+    "acte_datable_recent": lambda r: (
+        bool(re.search(r"[Aa]cte en date du \d{2}/\d{2}/\d{4}", str(deplier(r.get("acte")) or {})))
+        and type_cedant(r) == "pm"
+        and any("prix stipul" in o.lower() for o in origines(r))
+    ),
 }
 
 MAX_PAR_CAS = 3
@@ -181,18 +189,22 @@ def rassembler(client: Any) -> list[dict[str, Any]]:
     """Constitue le vivier : PACA recent + requetes ciblees sur les cas rares."""
     vivier: dict[str, dict[str, Any]] = {}
 
+    # `order_by` compte : sans lui l'API rend les annonces les plus anciennes,
+    # et aucune fixture ne couvrirait le cas modal — une cession recente dont
+    # l'acte est datable.
     requetes = [
-        (f'familleavis="vente" AND ({DEPTS})', 400),
-        ('familleavis="vente" AND listeetablissements LIKE "francs"', 100),
-        ('familleavis="vente" AND listeetablissements LIKE "FRF"', 50),
-        ('familleavis="vente" AND listeetablissements LIKE "apport"', 100),
+        (f'familleavis="vente" AND ({DEPTS})', 400, "dateparution DESC"),
+        (f'familleavis="vente" AND ({DEPTS})', 200, None),
+        ('familleavis="vente" AND listeetablissements LIKE "francs"', 100, None),
+        ('familleavis="vente" AND listeetablissements LIKE "FRF"', 50, None),
+        ('familleavis="vente" AND listeetablissements LIKE "apport"', 100, None),
     ]
-    for where, total in requetes:
+    for where, total, ordre in requetes:
         for offset in range(0, total, 100):
-            reponse = client.get(
-                f"{BASE}/records",
-                params={"where": where, "limit": 100, "offset": offset},
-            )
+            params: dict[str, Any] = {"where": where, "limit": 100, "offset": offset}
+            if ordre:
+                params["order_by"] = ordre
+            reponse = client.get(f"{BASE}/records", params=params)
             reponse.raise_for_status()
             resultats = reponse.json().get("results", [])
             if not resultats:

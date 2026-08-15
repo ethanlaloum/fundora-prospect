@@ -179,16 +179,20 @@ def test_annonce_mono_etablissement_n_est_pas_ambigue() -> None:
 
 
 def test_la_date_d_acte_est_remontee_quand_elle_existe() -> None:
-    """Elle sert au garde du parser, et a la fraicheur du scoring en Phase 2."""
+    """Elle sert au garde du parser, et a la fraicheur du scoring en Phase 2.
+
+    La fixture `acte_datable_recent` existe pour que ce test ne puisse pas
+    passer a vide : sans elle, la liste etait vide et l'assertion jamais
+    evaluee — un test vacuous qui donnait l'illusion d'une couverture.
+    """
     datees = [
-        a
-        for nom in ("achat_cedant_pm", "achat_cedant_pp")
-        for brut in cas(nom)
-        if (a := construire_annonce(brut)) is not None and a.date_acte is not None
+        a for brut in cas("acte_datable_recent") if (a := construire_annonce(brut)) is not None
     ]
+    assert datees, "la fixture acte_datable_recent doit produire des annonces"
     for annonce in datees:
-        assert isinstance(annonce.date_acte, date)
+        assert isinstance(annonce.date_acte, date), f"{annonce.id} sans date d'acte"
         assert annonce.prix.ecart_acte_jours is not None
+        assert annonce.prix.retenu
 
 
 def test_toutes_les_fixtures_se_construisent_sans_exception() -> None:

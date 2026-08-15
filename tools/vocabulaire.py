@@ -102,9 +102,10 @@ LEXIQUE_ORIGINE_FONDS = frozenset(
     complementaire creation d de des donation du elements en est et etablissement
     evalue evaluee exploitation exploite exploitee fonds francais francs frf
     gerance heritage indivision l la le les licence location locationgerance
-    montant negoce par partiel partie precedemment principal prix propriete
-    rachat recu reprise secondaire siege societe stipule stipulee succession
-    suite sur titre transmission un une universalite valeur vente
+    artisanal montant negoce par partiel partie pour precedemment principal
+    prix propriete rachat recu reprise secondaire siege societe stipule
+    stipulee succession suite sur titre transmission un une universalite
+    valeur vente
     euro euros eur
     """.split()
 )

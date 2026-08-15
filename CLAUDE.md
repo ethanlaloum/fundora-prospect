@@ -31,8 +31,10 @@ inférence trop faible — et sur des personnes que l'annonce ne nomme pas.
 Conséquences :
 
 - **Segment principal : cédant personne morale toujours active.** Prospection
-  B2B, intérêt légitime solide, ~1 046 cas/an en PACA (mesuré Phase 0).
+  B2B, intérêt légitime solide, **~898 cas/an en PACA** (mesuré Phase 1).
   Société active = trésorerie encore au bilan, à placer.
+  *Ne pas confondre avec les ~1 046/an, qui comptent **tous** les cédants —
+  voir l'attribution du volume plus bas.*
 - **Segment secondaire : cédant personne physique.** ~135 cas/an en PACA.
   Conservé, mais **explicitement marqué dans le modèle comme relevant d'une
   base légale distincte** (prospection de personne physique ≠ B2B). Ne pas
@@ -85,17 +87,27 @@ exclusion de qualite**.
 Le volume final mesure en Phase 1 est de **~895/an**. La difference se
 decompose ainsi :
 
-| Etape | Volume | Cause |
-|---|---|---|
-| Tous cédants > 200 k€ | ~1 046 | — |
-| Recentrage sur les personnes morales | ~900 | **décision de cible** |
-| Exclusion apports, devises obsolètes, actes anciens | ~895 | qualité de donnée |
+| Etape | Volume | Écart | Cause |
+|---|---|---|---|
+| Tous cédants > 200 k€ | ~1 046 | — | — |
+| Recentrage sur les personnes morales | ~900 | **−14 %** | **décision de cible** |
+| Exclusion apports, devises obsolètes, actes anciens | ~898 | −0,5 % | qualité de donnée |
 
 **L'essentiel de la baisse vient du recentrage sur la cible, pas des filtres
 de qualité** — ceux-ci retirent environ 5 leads. Formuler l'inverse
 attribuerait au parser un effet qui appartient a l'arbitrage commercial.
 
-Formulation correcte pour le README : « ~895 cessions de plus de 200 k€ par an
+**Deux chiffres à ne jamais confondre** :
+
+- **86 %** est la *part* des personnes morales parmi les cessions > 200 k€
+  (240/279). C'est ce qu'on **garde**.
+- **14 %** est ce que le recentrage **écarte** (~1 046 → ~900).
+
+Écrire « le recentrage écarte 86 % » inverse les deux. L'erreur est apparue
+deux fois dans ce projet ; elle vient de ce que 86 % est le chiffre le plus
+frappant, donc celui qu'on retient sans son référent.
+
+Formulation correcte pour le README : « ~898 cessions de plus de 200 k€ par an
 en PACA avec un cédant personne morale, sur ~1 046 cessions de plus de 200 k€
 tous cédants confondus. »
 
