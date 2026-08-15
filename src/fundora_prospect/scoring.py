@@ -18,9 +18,11 @@ date du jour est un parametre, pas un appel a `date.today()`.
 from __future__ import annotations
 
 import math
+import os
 import tomllib
 from dataclasses import dataclass
 from datetime import date
+from importlib import resources
 from pathlib import Path
 
 from fundora_prospect.models import (
@@ -30,7 +32,46 @@ from fundora_prospect.models import (
     StatutEntreprise,
 )
 
-CHEMIN_CONFIG = Path(__file__).resolve().parents[2] / "config" / "ponderation.toml"
+VARIABLE_PONDERATION = "FUNDORA_PONDERATION"
+
+
+def chemin_ponderation() -> Path:
+    """Localise `ponderation.toml`, dans cet ordre de precedence.
+
+    1. La variable d'environnement `FUNDORA_PONDERATION`, qui permet de pointer
+       une grille recalibree sans toucher au depot.
+    2. La donnee de paquet, seul chemin qui fonctionne apres `pip install`
+       sans `-e` — le cas du serveur MCP, lance en stdio depuis un repertoire
+       arbitraire, et du plugin empaquete.
+    3. Le fichier a la racine du depot, pour le developpement en editable.
+
+    Un simple `Path(__file__).parents[2]` ne couvrait que le troisieme cas et
+    levait un `FileNotFoundError` sur une installation normale.
+    """
+    force = os.environ.get(VARIABLE_PONDERATION)
+    if force:
+        chemin = Path(force).expanduser()
+        if not chemin.is_file():
+            raise FileNotFoundError(
+                f"{VARIABLE_PONDERATION}={force!r} ne designe aucun fichier lisible"
+            )
+        return chemin
+
+    try:
+        ressource = resources.files("fundora_prospect") / "config" / "ponderation.toml"
+        if ressource.is_file():
+            return Path(str(ressource))
+    except (ModuleNotFoundError, TypeError, OSError):  # pragma: no cover
+        pass
+
+    depot = Path(__file__).resolve().parents[2] / "config" / "ponderation.toml"
+    if depot.is_file():
+        return depot
+
+    raise FileNotFoundError(
+        "ponderation.toml introuvable : ni via "
+        f"{VARIABLE_PONDERATION}, ni dans le paquet, ni a la racine du depot"
+    )
 
 
 # --- Configuration ------------------------------------------------------------
@@ -87,8 +128,6 @@ class GrillePonderation:
     departement: CritereDepartement
     controle: Controle
 
-    CHEMIN_DEFAUT = CHEMIN_CONFIG
-
     @classmethod
     def depuis_toml(cls, chemin: Path) -> GrillePonderation:
         charge = tomllib.loads(chemin.read_text(encoding="utf-8"))
@@ -130,7 +169,7 @@ class GrillePonderation:
 
     @classmethod
     def defaut(cls) -> GrillePonderation:
-        return cls.depuis_toml(CHEMIN_CONFIG)
+        return cls.depuis_toml(chemin_ponderation())
 
 
 # --- Normalisations -----------------------------------------------------------

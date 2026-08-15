@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import httpx
@@ -27,10 +28,24 @@ DOMAINES_AUTORISES = frozenset(
     }
 )
 
-# Les reponses en cache contiennent des donnees personnelles reelles issues du
-# BODACC. Elles vivent hors du depot : le .gitignore protege du commit, pas
-# d'une archive du repertoire de travail (contrainte 4).
-CACHE_DEFAUT = Path.home() / ".cache" / "fundora-prospect" / "http"
+VARIABLE_CACHE = "FUNDORA_CACHE_DIR"
+
+
+def repertoire_cache() -> Path:
+    """Repertoire du cache HTTP, surchargeable par `FUNDORA_CACHE_DIR`.
+
+    Les reponses en cache contiennent des donnees personnelles reelles issues
+    du BODACC. Elles vivent HORS du depot : le .gitignore protege du commit,
+    pas d'une archive du repertoire de travail (contrainte 4).
+
+    La variable d'environnement existe pour qu'on puisse verifier une mesure
+    a froid — sans elle, la seule facon de vider le cache etait de detourner
+    `HOME`, ce qui n'est ni documentable ni sur.
+    """
+    force = os.environ.get(VARIABLE_CACHE)
+    if force:
+        return Path(force).expanduser()
+    return Path.home() / ".cache" / "fundora-prospect" / "http"
 
 
 class DomaineNonAutoriseError(RuntimeError):
@@ -79,9 +94,9 @@ class TransportCache(httpx.BaseTransport):
     tests reseau et le calcul du volume 12 mois epuiseraient le quota anonyme.
     """
 
-    def __init__(self, transport: httpx.BaseTransport, repertoire: Path = CACHE_DEFAUT) -> None:
+    def __init__(self, transport: httpx.BaseTransport, repertoire: Path | None = None) -> None:
         self._transport = transport
-        self._repertoire = repertoire
+        self._repertoire = repertoire if repertoire is not None else repertoire_cache()
         self._repertoire.mkdir(parents=True, exist_ok=True)
 
     def _chemin(self, request: httpx.Request) -> Path:
@@ -123,7 +138,8 @@ class TransportCache(httpx.BaseTransport):
 
 def creer_client(
     *,
-    cache: Path | None = CACHE_DEFAUT,
+    cache: Path | None = None,
+    sans_cache: bool = False,
     timeout: float = 30.0,
     domaines: frozenset[str] = DOMAINES_AUTORISES,
 ) -> httpx.Client:
@@ -133,7 +149,7 @@ def creer_client(
     donc un domaine interdit est refuse meme si une reponse tramaine en cache.
     """
     transport: httpx.BaseTransport = httpx.HTTPTransport()
-    if cache is not None:
+    if not sans_cache:
         transport = TransportCache(transport, cache)
     return httpx.Client(
         transport=TransportWhitelist(transport, domaines),
