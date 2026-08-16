@@ -182,12 +182,41 @@ def test_le_nom_du_plugin_est_identique_dans_les_deux_manifestes() -> None:
     assert marketplace["plugins"][0]["name"] == plugin["name"]
 
 
-def test_la_version_est_identique_dans_les_deux_manifestes() -> None:
+def _versions_declarees() -> dict[str, str]:
+    """Les QUATRE endroits ou la version du plugin est ecrite.
+
+    Les deux manifestes ne suffisent pas. `pyproject.toml` decide de la version
+    du paquet, et `__version__` est ce que le serveur MCP annonce au client dans
+    `serverInfo.version` — c'est la seule des quatre qu'un tiers voit a
+    l'execution. Une divergence est donc visible de l'exterieur.
+
+    Mesure du 2026-08-16 : les manifestes portaient 0.2.0, `pyproject.toml` et
+    `__version__` etaient restes a 0.1.0. Le serveur MCP annoncait 0.1.0 pendant
+    que le cache des plugins l'indexait sous 0.2.0. Les deux tests d'egalite de
+    l'epoque ne comparaient que les manifestes entre eux : ils passaient.
+    """
+    import tomllib
+
+    from fundora_prospect import __version__
+
     plugin = json.loads((RACINE / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     marketplace = json.loads(
         (RACINE / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
     )
-    assert marketplace["plugins"][0]["version"] == plugin["version"]
+    pyproject = tomllib.loads((RACINE / "pyproject.toml").read_text(encoding="utf-8"))
+
+    return {
+        "plugin.json": plugin["version"],
+        "marketplace.json": marketplace["plugins"][0]["version"],
+        "pyproject.toml": pyproject["project"]["version"],
+        "__version__": __version__,
+    }
+
+
+def test_la_version_est_identique_dans_les_quatre_sources() -> None:
+    versions = _versions_declarees()
+    distinctes = set(versions.values())
+    assert len(distinctes) == 1, f"versions divergentes : {versions}"
 
 
 # --- Lancement du serveur MCP hors du depot -----------------------------------

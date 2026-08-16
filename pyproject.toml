@@ -1,6 +1,6 @@
 [project]
 name = "fundora-prospect"
-version = "0.1.0"
+version = "0.2.0"
 description = "Detection et qualification de prospects investisseurs a partir des publications legales BODACC"
 requires-python = ">=3.11"
 dependencies = [
