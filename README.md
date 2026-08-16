@@ -468,10 +468,102 @@ ordre — `$FUNDORA_PYTHON`, le venv du dépôt s'il existe, puis le `PATH` — 
 s'il n'en trouve aucun, il sort en nommant la commande de réparation plutôt
 que de mourir en silence sur un « Connection closed ».
 
-Un test lance la commande exacte de `.mcp.json` depuis une copie du plugin
-**privée de `.venv`**, dans un répertoire arbitraire, et exige un vrai
-handshake MCP. C'est la vérification qui manquait quand le chemin de
-configuration a cassé en installation non-éditable.
+Trois tests lancent la commande exacte de `.mcp.json` depuis une copie du
+plugin, dans un répertoire arbitraire — un par branche de recherche de
+l'interpréteur :
+
+| Branche | Situation reconstituée | Ce qui est exigé |
+|---|---|---|
+| `$FUNDORA_PYTHON` | surcharge explicite | handshake MCP |
+| `<racine>/.venv` | venv à l'emplacement conventionnel, **aucun Python sur le `PATH`** | handshake MCP |
+| `PATH` | **aucun Python utilisable nulle part** | échec nommant les paquets et la réparation |
+
+Les deux derniers tournent avec un `PATH` réduit à un répertoire qui ne
+contient que `dirname` et `cat` — les seuls binaires externes dont le lanceur a
+besoin. Sans cette réduction, ils passeraient sur une machine de développement
+pour une raison sans rapport avec ce qu'ils prétendent vérifier : un `python3`
+du `PATH` qui porte les dépendances.
+
+**C'est une correction, pas une précaution.** Jusqu'au 2026-08-16, un seul test
+couvrait le lanceur, et il se donnait `FUNDORA_PYTHON=sys.executable` — donc il
+validait le lanceur *à condition qu'on lui tende un interpréteur utilisable*,
+alors que la panne réelle est « aucun interpréteur trouvé ». Le serveur MCP du
+plugin installé ne démarrait pas sur la machine de développement pendant que la
+suite était verte. Un commentaire affirmait même que sans `FUNDORA_PYTHON` le
+lanceur « chercherait sur le `PATH` — ce qui marche aussi » : garantie jamais
+mesurée, et fausse. Même famille que la leçon sur les symboles jamais
+construits, d'un cran plus subtile — ici le test appelait bien le code, mais
+neutralisait la variable qu'il était censé éprouver.
+
+#### Le mur d'installation : les Python récents refusent `pip install --user`
+
+C'est ce que rencontrera quiconque installe le plugin, et ça mérite d'être
+écrit tel que ça s'est présenté plutôt qu'en conseil général.
+
+**Symptôme.** `claude mcp list` affiche :
+
+```
+plugin:fundora-prospect:fundora-prospect  ✘ Failed to connect — Connection closed
+```
+
+Les compétences se chargent quand même — elles sont du texte — puis elles
+pointent vers un outil MCP qui n'existe pas. La capacité principale du plugin
+est morte sans qu'aucun test ne l'indique.
+
+**Diagnostic.** Claude Code ne montre que « Connection closed ». Le message du
+lanceur, lui, est explicite : il faut l'exécuter à la main.
+
+```
+~/.claude/plugins/cache/fundora/fundora-prospect/<version>/bin/fundora-prospect-mcp
+```
+
+**Cause, mesurée le 2026-08-16.** Aucun interpréteur du `PATH` ne portait les
+trois dépendances, et le dossier de cache n'a pas de `.venv` — les deux
+premières branches de recherche échouaient, la troisième aussi.
+
+**Le piège.** La réparation évidente, `python3 -m pip install --user`, échoue
+sur un Python installé par Homebrew : il est marqué `EXTERNALLY-MANAGED`
+(PEP 668) et refuse toute installation hors venv. Sur cette machine,
+`python3` et `python3.13` étaient ce Python-là.
+
+Vérifier avant d'essayer :
+
+```
+python3 -c 'import sysconfig, os; p = sysconfig.get_path("stdlib") + "/EXTERNALLY-MANAGED"; \
+print("refuse --user" if os.path.exists(p) else "accepte --user")'
+```
+
+**Trois réparations, par ordre de durabilité :**
+
+1. **Un interpréteur qui accepte `--user`.** Les builds python.org
+   (`/Library/Frameworks/Python.framework/…`) ne sont pas marqués. C'est ce qui
+   a été fait ici, sur `python3.11` :
+
+   ```
+   python3.11 -m pip install --user "httpx>=0.27" "pydantic>=2.7" "mcp>=2.0"
+   ```
+
+   Le lanceur trouve alors l'interpréteur seul, par sa troisième branche.
+   Aucune variable d'environnement à poser, et ça survit aux mises à jour du
+   plugin.
+
+2. **Un venv dédié, désigné par `FUNDORA_PYTHON`.** Fonctionne avec n'importe
+   quel Python, y compris Homebrew. Demande que la variable soit visible du
+   processus qui lance Claude Code.
+
+   ```
+   python3 -m venv ~/.local/share/fundora-prospect
+   ~/.local/share/fundora-prospect/bin/pip install "httpx>=0.27" "pydantic>=2.7" "mcp>=2.0"
+   export FUNDORA_PYTHON=~/.local/share/fundora-prospect/bin/python
+   ```
+
+3. **Un venv dans le dossier du cache** — voir plus bas. Le plus direct, mais
+   ce chemin contient le numéro de version : il est à refaire à chaque mise à
+   jour du plugin.
+
+`--break-system-packages` marche aussi sur un Python Homebrew. À éviter : le
+gain est nul par rapport au venv dédié, et le coût est une installation
+système que le gestionnaire de paquets ne connaît pas.
 
 #### Mettre à jour : le cache est indexé par version
 
@@ -487,8 +579,15 @@ jour, et le plugin exécuté reste l'ancien. On le repère à ce qui ne devrait
 plus être là — une description d'outil périmée, un fichier neuf absent.
 
 Donc : **toute modification livrée s'accompagne d'un incrément de version**,
-dans `plugin.json` *et* dans `marketplace.json`. Un test vérifie que les deux
-manifestes ne divergent pas.
+dans `plugin.json`, `marketplace.json`, `pyproject.toml` *et* `__version__`. Un
+test vérifie que les quatre ne divergent pas.
+
+Les deux manifestes ne suffisaient pas : `__version__` est ce que le serveur
+annonce au client dans `serverInfo.version`, donc **la seule des quatre qu'un
+tiers observe à l'exécution**. Le 2026-08-16, les manifestes portaient `0.2.0`
+et les deux autres sources étaient restées à `0.1.0` — le serveur MCP annonçait
+`0.1.0` pendant que le cache l'indexait sous `0.2.0`. Les tests d'égalité de
+l'époque ne comparaient les manifestes qu'entre eux.
 
 Deuxième piège, indépendant : `/plugin reload` ne tue pas le processus du
 serveur MCP déjà lancé. Après une mise à jour, il faut **redémarrer Claude

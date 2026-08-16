@@ -241,51 +241,93 @@ def _copier_plugin_sans_venv(destination: Path) -> Path:
     return destination
 
 
-def test_la_commande_de_mcp_json_repond_sans_venv_dans_l_arborescence(tmp_path) -> None:
-    """LE test qui manquait en Phase 4.
-
-    On ne verifie pas qu'un chemin existe : on lance la commande exacte lue
-    dans `.mcp.json`, depuis une copie du plugin PRIVEE de `.venv`, placee
-    dans un repertoire arbitraire — et on exige un vrai handshake MCP.
-
-    Le defaut precedent (`${CLAUDE_PLUGIN_ROOT}/.venv/bin/...`) passait tous
-    les tests de l'epoque et ne resolvait sur aucune machine tierce.
-    """
-    import os
-    import shutil
-    import subprocess
-    import sys
-
-    racine_copie = _copier_plugin_sans_venv(tmp_path / "plugin")
-
+def _commande_de_mcp_json(racine_copie: Path) -> str:
+    """La commande exacte lue dans `.mcp.json`, resolue sur la copie."""
     charge = json.loads((racine_copie / ".mcp.json").read_text(encoding="utf-8"))
     modele = charge["mcpServers"]["fundora-prospect"]["command"]
     commande = modele.replace("${CLAUDE_PLUGIN_ROOT}", str(racine_copie))
     assert Path(commande).is_file(), f"{commande} n'existe pas dans la copie"
+    return commande
 
-    # `FUNDORA_PYTHON` designe l'interpreteur qui porte les dependances. Sans
-    # lui, le wrapper chercherait sur le PATH — ce qui marche aussi, mais
-    # dependrait de la machine de test.
-    env = dict(os.environ, FUNDORA_PYTHON=sys.executable)
-    env.pop("PYTHONPATH", None)
-    env.pop("CLAUDE_PLUGIN_ROOT", None)
 
-    poignee = (
-        '{"jsonrpc":"2.0","id":1,"method":"initialize","params":'
-        '{"protocolVersion":"2024-11-05","capabilities":{},'
-        '"clientInfo":{"name":"test","version":"1"}}}\n'
-    )
-    resultat = subprocess.run(
-        [commande],
-        input=poignee,
+# Les binaires externes dont `bin/fundora-prospect-mcp` a besoin : `dirname`
+# pour resoudre sa propre racine, `cat` pour imprimer le message d'echec. Tout
+# le reste est un builtin de `sh`. Les lister ici permet de fabriquer un PATH
+# qui contient le strict necessaire — et surtout AUCUN Python.
+UTILITAIRES_DU_WRAPPER = ("dirname", "cat")
+
+
+def _environnement_de_tiers(tmp_path: Path) -> dict[str, str]:
+    """L'environnement d'un tiers qui vient de cloner : aucun Python utilisable.
+
+    Trois variables sont retirees parce qu'un tiers ne les a pas :
+    `FUNDORA_PYTHON` (l'echappatoire), `PYTHONPATH` et `VIRTUAL_ENV` (poses par
+    le venv qui fait tourner pytest). Et le PATH est reduit a un repertoire qui
+    ne contient que `dirname` et `cat` : `command -v python3` n'y trouve rien.
+
+    Sans cette reduction, le test dependrait de la machine — sur une machine de
+    developpement, un `python3` du PATH porte souvent les dependances, et le
+    test passe pour une raison qui n'a rien a voir avec ce qu'il pretend
+    verifier.
+    """
+    import os
+    import shutil
+
+    bac = tmp_path / "bin-sans-python"
+    bac.mkdir(exist_ok=True)
+    for utilitaire in UTILITAIRES_DU_WRAPPER:
+        source = shutil.which(utilitaire)
+        assert source, f"{utilitaire} introuvable — le wrapper ne peut pas tourner"
+        cible = bac / utilitaire
+        if not cible.exists():
+            cible.symlink_to(source)
+
+    env = dict(os.environ, PATH=str(bac))
+    for variable in ("FUNDORA_PYTHON", "PYTHONPATH", "CLAUDE_PLUGIN_ROOT", "VIRTUAL_ENV"):
+        env.pop(variable, None)
+
+    # Le garde-fou du garde-fou : si un Python restait joignable, les deux
+    # tests ci-dessous ne prouveraient plus rien.
+    assert shutil.which("python3", path=str(bac)) is None
+    return env
+
+
+def _poser_le_venv_conventionnel(racine_copie: Path) -> Path:
+    """Cree un vrai venv a `<racine>/.venv`, l'emplacement que cherche le wrapper.
+
+    Le venv est cree sans pip — installer les dependances par le reseau dans un
+    test unitaire serait lent et fragile. Elles sont rendues visibles par un
+    `.pth` qui pointe le site-packages de l'interpreteur courant. Le resultat
+    est un venv authentique : `bin/python` reel, `pyvenv.cfg` reel, et les trois
+    dependances importables.
+    """
+    import subprocess
+    import sys
+    import sysconfig
+
+    venv = racine_copie / ".venv"
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(venv)],
         capture_output=True,
-        text=True,
-        cwd=tmp_path,  # repertoire arbitraire, sans rapport avec le plugin
-        env=env,
-        timeout=60,
-        check=False,
+        timeout=120,
+        check=True,
     )
+    site_packages = next(venv.glob("lib/python*/site-packages"))
+    (site_packages / "dependances-du-test.pth").write_text(
+        sysconfig.get_paths()["purelib"] + "\n", encoding="utf-8"
+    )
+    assert (venv / "bin" / "python").exists()
+    return venv
 
+
+POIGNEE_MCP = (
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":'
+    '{"protocolVersion":"2024-11-05","capabilities":{},'
+    '"clientInfo":{"name":"test","version":"1"}}}\n'
+)
+
+
+def _exiger_un_handshake(resultat) -> None:
     assert '"jsonrpc"' in resultat.stdout, (
         f"pas de reponse MCP.\nstdout: {resultat.stdout[:400]}\nstderr: {resultat.stderr[:600]}"
     )
@@ -294,6 +336,117 @@ def test_la_commande_de_mcp_json_repond_sans_venv_dans_l_arborescence(tmp_path) 
     assert "capabilities" in reponse["result"]
     assert reponse["result"]["serverInfo"]["name"] == "fundora-prospect"
 
+
+def test_un_tiers_sans_interprete_utilisable_obtient_un_echec_qui_se_repare(tmp_path) -> None:
+    """Branche 3 de `trouver_interprete` : la recherche sur le PATH echoue.
+
+    C'est la situation reelle constatee le 2026-08-16 : le serveur MCP du
+    plugin installe repondait « Connection closed » a Claude Code parce
+    qu'aucun Python du PATH ne portait `httpx`, `pydantic` et `mcp`, et que le
+    cache du plugin n'a pas de `.venv`.
+
+    Un serveur MCP qui meurt en silence est indiagnosticable depuis Claude
+    Code : le message doit nommer les paquets manquants ET la commande a taper.
+    """
+    import shutil
+    import subprocess
+
+    racine_copie = _copier_plugin_sans_venv(tmp_path / "plugin")
+    resultat = subprocess.run(
+        [_commande_de_mcp_json(racine_copie)],
+        input=POIGNEE_MCP,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=_environnement_de_tiers(tmp_path),
+        timeout=120,
+        check=False,
+    )
+
+    assert resultat.returncode != 0, "un echec doit se voir dans le code de sortie"
+    assert '"jsonrpc"' not in resultat.stdout, "aucun handshake ne doit sortir"
+
+    message = resultat.stderr
+    assert "aucun interpreteur" in message.lower()
+    for paquet in ("httpx", "pydantic", "mcp"):
+        assert paquet in message, f"le message doit nommer le paquet manquant {paquet!r}"
+    for reparation in ("pip install", "venv", "FUNDORA_PYTHON"):
+        assert reparation in message, f"le message doit donner la reparation {reparation!r}"
+
+    shutil.rmtree(racine_copie, ignore_errors=True)
+
+
+def test_un_tiers_avec_le_venv_conventionnel_obtient_un_handshake(tmp_path) -> None:
+    """Branche 2 de `trouver_interprete` : `<racine>/.venv/bin/python`.
+
+    Meme environnement appauvri que le test precedent — pas de
+    `FUNDORA_PYTHON`, pas de Python sur le PATH. La seule difference est le
+    venv pose a l'emplacement conventionnel. Si le handshake passe ici et
+    echoue au-dessus, c'est bien ce venv qui a ete trouve, et rien d'autre.
+    """
+    import shutil
+    import subprocess
+
+    racine_copie = _copier_plugin_sans_venv(tmp_path / "plugin")
+    _poser_le_venv_conventionnel(racine_copie)
+
+    resultat = subprocess.run(
+        [_commande_de_mcp_json(racine_copie)],
+        input=POIGNEE_MCP,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=_environnement_de_tiers(tmp_path),
+        timeout=120,
+        check=False,
+    )
+
+    _exiger_un_handshake(resultat)
+    shutil.rmtree(racine_copie, ignore_errors=True)
+
+
+def test_l_echappatoire_fundora_python_repond_hors_du_depot(tmp_path) -> None:
+    """Branche 1 de `trouver_interprete` : la surcharge explicite.
+
+    ATTENTION a ce que ce test ne prouve PAS. En posant `FUNDORA_PYTHON`, il se
+    donne l'interpreteur qui porte les dependances : il valide le wrapper *a
+    condition qu'on lui tende un interpreteur utilisable*. Il ne dit rien de la
+    recherche sur le PATH, qui est la branche qu'emprunte reellement Claude
+    Code — et qui a echoue en production le 2026-08-16 pendant que ce test
+    etait vert.
+
+    Le commentaire qui figurait ici affirmait que sans `FUNDORA_PYTHON` le
+    wrapper « chercherait sur le PATH — ce qui marche aussi ». C'etait une
+    garantie jamais mesuree, et fausse sur la machine de developpement. Un
+    commentaire qui rassure sur une garantie non verifiee est pire que pas de
+    commentaire : il decourage precisement le test qui manque.
+
+    Les deux branches non couvertes ici le sont par les deux tests au-dessus.
+    """
+    import os
+    import shutil
+    import subprocess
+    import sys
+
+    racine_copie = _copier_plugin_sans_venv(tmp_path / "plugin")
+    commande = _commande_de_mcp_json(racine_copie)
+
+    env = dict(os.environ, FUNDORA_PYTHON=sys.executable)
+    env.pop("PYTHONPATH", None)
+    env.pop("CLAUDE_PLUGIN_ROOT", None)
+
+    resultat = subprocess.run(
+        [commande],
+        input=POIGNEE_MCP,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,  # repertoire arbitraire, sans rapport avec le plugin
+        env=env,
+        timeout=120,
+        check=False,
+    )
+
+    _exiger_un_handshake(resultat)
     shutil.rmtree(racine_copie, ignore_errors=True)
 
 
