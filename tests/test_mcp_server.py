@@ -25,7 +25,7 @@ from mcp.client.session import ClientSession
 from mcp.shared.memory import create_client_server_memory_streams
 
 from fundora_prospect import mcp_server
-from fundora_prospect.bodacc import Annonce, Cedant, construire_annonce
+from fundora_prospect.bodacc import Annonce, Cedant, ResultatRecherche, construire_annonce
 from fundora_prospect.enrichment import Enrichissement
 from fundora_prospect.models import StatutEntreprise
 from fundora_prospect.prix import Confiance, PrixCession, Qualification
@@ -36,6 +36,21 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def annonces_de(nom: str) -> list:
     charge = json.loads((FIXTURES / f"{nom}.json").read_text(encoding="utf-8"))
     return [a for brut in charge if (a := construire_annonce(brut)) is not None]
+
+
+def recherche_de(
+    corpus: list,
+    publiees: int | None = None,
+    rapatriees: int | None = None,
+) -> ResultatRecherche:
+    """Par defaut, une recherche exhaustive : rien perdu au plafond, rien
+    d'illisible. Les tests qui mesurent l'incompletude passent les deux autres
+    nombres explicitement."""
+    return ResultatRecherche(
+        annonces=list(corpus),
+        publiees=len(corpus) if publiees is None else publiees,
+        rapatriees=len(corpus) if rapatriees is None else rapatriees,
+    )
 
 
 def fabriquer_annonce(
@@ -122,7 +137,7 @@ def sans_reseau(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
         statut: StatutEntreprise = StatutEntreprise.ACTIVE,
     ) -> None:
         corpus = annonces if annonces is not None else annonces_de("acte_datable_recent")
-        monkeypatch.setattr(mcp_server, "rechercher", lambda **_: list(corpus))
+        monkeypatch.setattr(mcp_server, "rechercher", lambda **_: recherche_de(corpus))
         monkeypatch.setattr(
             mcp_server,
             "enrichir",
@@ -195,11 +210,11 @@ def test_la_sortie_porte_les_motifs_de_refus(sans_reseau) -> None:
     charge = appeler("search_liquidity_events", {"departement": "13"}).structured_content
 
     stats = charge["statistiques"]
-    assert stats["annonces_examinees"] > 0
+    assert stats["annonces_publiees"] > 0
     assert stats["leads_classables"] >= 0
     assert stats["ecartes"], "les refus doivent etre ventiles par motif"
     assert sum(stats["ecartes"].values()) > 0
-    assert "resume" in charge and str(stats["annonces_examinees"]) in charge["resume"]
+    assert "resume" in charge and str(stats["annonces_publiees"]) in charge["resume"]
 
 
 def test_une_societe_cessee_est_ecartee_et_comptee(sans_reseau) -> None:
@@ -232,7 +247,7 @@ def test_la_provenance_distingue_les_deux_segments(monkeypatch: pytest.MonkeyPat
         fabriquer_annonce("SOCIETE-CEDANTE", 300_000, 10, type_personne="pm"),
         fabriquer_annonce("COMMERCANT-CEDANT", 300_000, 10, type_personne="pp"),
     ]
-    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: corpus)
+    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: recherche_de(corpus))
     monkeypatch.setattr(
         mcp_server,
         "enrichir",
@@ -258,7 +273,7 @@ def test_une_annonce_sans_url_est_ecartee_et_non_rendue_sans_provenance(
         fabriquer_annonce("TRACABLE", 300_000, 10),
         fabriquer_annonce("SANS-URL", 900_000, 5, url=""),
     ]
-    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: corpus)
+    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: recherche_de(corpus))
     monkeypatch.setattr(
         mcp_server,
         "enrichir",
@@ -289,6 +304,77 @@ def test_la_limite_borne_le_nombre_de_leads(sans_reseau) -> None:
     assert len(charge["leads"]) <= 1
 
 
+def test_le_plafond_de_rapatriement_est_annonce(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le jumeau de `leads_classables`, en amont du pipeline.
+
+    `annonces_examinees` comptait les annonces APRES le plafond de
+    rapatriement et APRES le filtre du client BODACC. Mesure reelle du
+    2026-08-16 sur le 06 : 662 publiees, 600 rapatriees, 458 exploitables — le
+    compteur annoncait 458 sous un nom qui promet la totalite, soit 69 % de la
+    population presentee comme 100 %.
+
+    Un chiffre plafonne doit dire qu'il l'est, sinon il se lit comme un total.
+    """
+    corpus = [fabriquer_annonce(f"CEDANT-{i}", 300_000, 10) for i in range(3)]
+    monkeypatch.setattr(
+        mcp_server,
+        "rechercher",
+        lambda **_: recherche_de(corpus, publiees=662, rapatriees=600),
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "enrichir",
+        lambda siren, **_: Enrichissement(
+            siren=str(siren or ""), statut=StatutEntreprise.ACTIVE, motif="fixture"
+        ),
+    )
+
+    charge = appeler("search_liquidity_events", {"departement": "06"}).structured_content
+    stats = charge["statistiques"]
+
+    assert stats["annonces_publiees"] == 662
+    assert stats["annonces_rapatriees"] == 600
+    assert stats["annonces_exploitables"] == 3
+    assert stats["plafond_atteint"] is True
+    assert "662 annonces publiees" in charge["resume"]
+    assert "600" in charge["resume"] and "plafond" in charge["resume"]
+
+
+def test_sans_plafond_atteint_le_resume_n_en_parle_pas(sans_reseau) -> None:
+    """Une reserve affichee en permanence cesse d'etre lue. Elle n'apparait que
+    quand elle mord."""
+    sans_reseau()
+    charge = appeler("search_liquidity_events", {"departement": "13"}).structured_content
+    assert charge["statistiques"]["plafond_atteint"] is False
+    assert "plafond" not in charge["resume"]
+
+
+def test_les_annonces_non_exploitables_sont_comptees(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`construire_annonce` ecarte les annonces sans cedant — 13 % du flux
+    d'apres la Phase 0, 23,7 % sur la mesure du 06. C'est un filtre reel, et
+    son decompte n'apparaissait dans aucun compteur : ni dans `ecartes`, ni
+    dans le total."""
+    corpus = [fabriquer_annonce(f"CEDANT-{i}", 300_000, 10) for i in range(3)]
+    monkeypatch.setattr(
+        mcp_server,
+        "rechercher",
+        lambda **_: recherche_de(corpus, publiees=10, rapatriees=10),
+    )
+    monkeypatch.setattr(
+        mcp_server,
+        "enrichir",
+        lambda siren, **_: Enrichissement(
+            siren=str(siren or ""), statut=StatutEntreprise.ACTIVE, motif="fixture"
+        ),
+    )
+
+    charge = appeler("search_liquidity_events", {"departement": "06"}).structured_content
+    stats = charge["statistiques"]
+
+    assert stats["sans_cedant_ou_illisibles"] == 7
+    assert "7 sans cedant ou illisibles" in charge["resume"]
+
+
 def test_la_troncature_ne_se_compte_pas_comme_un_refus(monkeypatch: pytest.MonkeyPatch) -> None:
     """`leads_classables` doit compter ce que la grille a juge classable, pas
     ce qui reste apres la coupe a `limite`.
@@ -300,7 +386,7 @@ def test_la_troncature_ne_se_compte_pas_comme_un_refus(monkeypatch: pytest.Monke
     detache de son referent se propage.
     """
     corpus = [fabriquer_annonce(f"CEDANT-{i}", 300_000 + i * 1_000, 10) for i in range(6)]
-    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: corpus)
+    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: recherche_de(corpus))
     monkeypatch.setattr(
         mcp_server,
         "enrichir",
@@ -327,7 +413,7 @@ def test_les_candidats_jamais_enrichis_sont_annonces(monkeypatch: pytest.MonkeyP
     amputee — c'est la lecon « un tri en amont est un filtre », appliquee au
     compte rendu."""
     corpus = [fabriquer_annonce(f"CEDANT-{i}", 300_000 + i * 1_000, 10) for i in range(9)]
-    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: corpus)
+    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: recherche_de(corpus))
     monkeypatch.setattr(
         mcp_server,
         "enrichir",
@@ -452,7 +538,9 @@ def test_une_api_muette_ne_fait_pas_echouer_la_recherche(
 ) -> None:
     """Un lead sans enrichissement reste un lead valide — la regle de la
     Phase 3 doit survivre au passage par MCP."""
-    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: annonces_de("acte_datable_recent"))
+    monkeypatch.setattr(
+        mcp_server, "rechercher", lambda **_: recherche_de(annonces_de("acte_datable_recent"))
+    )
     monkeypatch.setattr(
         mcp_server,
         "enrichir",
@@ -482,7 +570,7 @@ def test_le_preclassement_ne_trie_pas_sur_le_montant_seul(
         fabriquer_annonce("GROSSE-ET-VIEILLE", 1_500_000, 900),
         fabriquer_annonce("MODESTE-ET-FRAICHE", 260_000, 5),
     ]
-    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: corpus)
+    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: recherche_de(corpus))
     monkeypatch.setattr(
         mcp_server,
         "enrichir",

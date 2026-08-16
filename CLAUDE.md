@@ -491,9 +491,10 @@ valeur avait survécu au changement de sa source.
 
 ### Leçon générale : un symbole jamais construit échappe à tous les tests
 
-`Provenance` et `Lead` étaient du code mort depuis la Phase 2. **416 tests ne
-l'ont pas signalé**, et c'est structurel : un test ne peut pas échouer sur du
-code qu'il n'appelle pas. La couverture ne le voit pas non plus — une classe
+`Provenance` et `Lead` étaient du code mort depuis la Phase 2. **Les 382 tests
+verts du commit `854d662` ne l'ont pas signalé**, et c'est structurel : un test
+ne peut pas échouer sur du code qu'il n'appelle pas. *(Chiffre daté du moment
+de la découverte, pas de l'état courant de la suite.)* La couverture ne le voit pas non plus — une classe
 jamais instanciée n'apparaît dans aucun rapport comme une ligne manquante,
 elle apparaît comme une ligne de `class` exécutée à l'import.
 
@@ -504,12 +505,37 @@ dépôt »**. `Lead` n'apparaissait nulle part ; `Provenance` n'apparaissait que
 dans l'annotation `Lead.provenance: Provenance`. **Une annotation n'est pas un
 usage : elle ne prouve que l'intention.**
 
-Audit passé au 2026-08-16 sur les 55 classes et fonctions publiques de `src/` :
-6 candidats, **tous justifiés** — trois outils MCP appelés par le protocole via
-`@serveur.tool`, et trois énumérations ou dataclasses utilisées par attribut
-(`Qualification.ACHAT`, `GrillePonderation.defaut()`). **Aucun code mort
-restant.** Vérifié en relançant l'audit sur le commit précédent : il y signale
-exactement `Lead` et `Provenance`, et rien d'autre.
+**L'audit est un verrou versionné, pas un script jetable :**
+`tools/symboles_morts.py`, lancé par `tests/test_symboles_morts.py`. Le projet
+a un verrou par contrainte — transport pour les domaines, liste blanche pour
+l'anonymisation, porte unique pour la traçabilité. Le code mort était la seule
+vérification restée déclarative, et c'est celle qui a laissé passer un défaut
+pendant cinq phases.
+
+Le test vérifie deux choses séparées : que le dépôt est propre, **et que
+l'audit lui-même a des dents** sur des cas fabriqués. Un audit qui rendrait
+toujours « rien à signaler » passerait le premier point sans rien garantir.
+
+Résultat au 2026-08-16 sur les 56 classes et fonctions publiques de `src/` :
+6 vivants sans appel direct, **tous justifiés** — trois outils MCP enregistrés
+par `@serveur.tool`, trois types utilisés par attribut (`Qualification.ACHAT`,
+`GrillePonderation.defaut()`). **Aucun code mort.** Vérifié en relançant
+l'audit sur le commit précédent : il y signale exactement `Lead` et
+`Provenance`, et rien d'autre.
+
+Deux règles apprises en écrivant l'outil :
+
+- **`@dataclass` ne justifie rien.** Il transforme la classe sur place, il ne
+  la confie à aucun appelant. Seul un décorateur qui *enregistre* le symbole
+  (`@serveur.tool`) explique une absence d'appel. La distinction compte ici :
+  `ResultatRecherche` et `GrillePonderation` sont des dataclasses gelées.
+- **L'outil ne résout pas les types, il lit des noms.** `provenance.assembler()`
+  compte pour `assembler` sans vérifier le module à gauche du point, donc un
+  homonyme d'une autre bibliothèque marquerait notre symbole vivant à tort.
+  Assumé : sans cette tolérance, l'audit signalait `assembler` et `serialiser`
+  comme morts alors que le serveur MCP les appelle à chaque lead. **Un audit
+  qui crie au loup est désactivé dans la semaine.** Le biais va donc vers le
+  silence — il peut manquer un mort, il ne doit pas en inventer.
 
 ### Leçon générale : un tri en amont est un filtre
 
@@ -542,6 +568,40 @@ Trois catégories que le décompte confondait, et qu'il sépare désormais :
 **non enrichi** (jamais examiné). Seule la première est un refus. Le résumé
 étant recopié tel quel à l'utilisateur, c'est exactement là que le chiffre
 détaché de son référent se propage.
+
+#### Le jumeau : `annonces_examinees`
+
+Cherché délibérément après la correction — *si un compteur ment, son voisin
+ment peut-être de la même façon.* Il mentait, et pire.
+
+`annonces_examinees` était compté après **deux** coupes : le plafond de
+rapatriement (600) et le filtre `construire_annonce` du client BODACC. Mesuré
+le 2026-08-16 sur le 06, six mois :
+
+| Population | Volume |
+|---|---|
+| Publiées au BODACC | **662** |
+| Rapatriées (plafond 600) | **600** — 62 jamais lues |
+| Exploitables | **458** — 142 sans cédant, sans décompte nulle part |
+
+Le compteur annonçait **458**, soit **69 % de la population présentée comme la
+totalité** — et le plafond mordait dans la mesure même que le README citait.
+Les 142 annonces sans cédant sont un filtre dur documenté depuis la Phase 0,
+mais elles n'apparaissaient dans aucun compteur : ni dans le total, ni dans
+`ecartes`.
+
+Remplacé par `annonces_publiees` / `annonces_rapatriees` /
+`annonces_exploitables` / `sans_cedant_ou_illisibles` / `plafond_atteint`. Les
+réserves ne s'affichent que **quand elles mordent** : une mise en garde
+permanente cesse d'être lue.
+
+`rechercher` rend désormais un `ResultatRecherche` qui porte, à côté de la
+liste, ce que la recherche **n'a pas regardé**. Coût : une requête `limit=0`
+par recherche. C'est le prix du seul nombre qui dise ce qu'on ignore.
+
+**La leçon générale :** un compteur nommé d'après une population doit être
+calculé sur cette population. Sinon il ne décrit pas un résultat, il décrit un
+budget — et le lecteur, lui, le lira comme un résultat.
 
 `models.py` : `LiquidityEvent`, `Lead`, `ScoreBreakdown` (pydantic).
 `scoring.py` : fonction pure et déterministe. Critères :

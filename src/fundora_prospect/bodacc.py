@@ -275,23 +275,65 @@ def compter(client: httpx.Client, where: str) -> int:
     return int(reponse.json()["total_count"])
 
 
+@dataclass(frozen=True)
+class ResultatRecherche:
+    """Ce que la recherche a trouve, ET ce qu'elle n'a pas regarde.
+
+    Ne rendre que `annonces` obligeait l'appelant a presenter un sous-ensemble
+    comme un total. Deux coupes se produisent avant que la liste existe :
+
+    - le **plafond de rapatriement** : on ne lit que `limite` enregistrements
+      sur les `publiees` que compte l'API ;
+    - le **filtre du client** : `construire_annonce` ecarte les annonces sans
+      cedant, ~13 % du flux d'apres la Phase 0.
+
+    Aucune des deux n'etait visible dans le compte rendu. Les deux nombres sont
+    donc portes ici, a cote de la liste, pour que l'appelant puisse dire sa
+    propre incompletude au lieu de la taire.
+    """
+
+    annonces: list[Annonce]
+    publiees: int
+    rapatriees: int
+
+    @property
+    def plafond_atteint(self) -> bool:
+        """Vrai des qu'une annonce publiee n'a pas ete rapatriee."""
+        return self.rapatriees < self.publiees
+
+    @property
+    def non_exploitables(self) -> int:
+        """Rapatriees mais ecartees par `construire_annonce` : sans cedant,
+        sans date de parution. Un filtre reel, longtemps sans decompte."""
+        return self.rapatriees - len(self.annonces)
+
+
 def rechercher(
     departements: Sequence[str] = DEPARTEMENTS_PACA,
     depuis: date | None = None,
     jusqu_a: date | None = None,
     limite: int = 100,
     client: httpx.Client | None = None,
-) -> list[Annonce]:
-    """Cessions exploitables sur la periode et les departements demandes."""
+) -> ResultatRecherche:
+    """Cessions exploitables sur la periode et les departements demandes.
+
+    Le `compter` initial coute une requete a `limit=0`. C'est le prix du seul
+    nombre qui dise ce qu'on n'a pas lu — negligeable devant la pagination
+    qui suit, et sans lui le plafond serait invisible.
+    """
     where = construire_where(departements, depuis, jusqu_a)
     propre = client is None
     client = client or creer_client()
     try:
-        return [
-            annonce
-            for brut in rechercher_brut(client, where, limite)
-            if (annonce := construire_annonce(brut)) is not None
-        ]
+        publiees = compter(client, where)
+        bruts = list(rechercher_brut(client, where, limite))
+        return ResultatRecherche(
+            annonces=[
+                annonce for brut in bruts if (annonce := construire_annonce(brut)) is not None
+            ],
+            publiees=publiees,
+            rapatriees=len(bruts),
+        )
     finally:
         if propre:
             client.close()

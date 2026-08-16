@@ -244,6 +244,7 @@ une case à cocher en fin de projet, c'est une contrainte d'architecture.
 | Scoring explicable | `somme(contributions) == score`, motif obligatoire par critère | `tests/test_scoring.py` |
 | Opposition INSEE respectée | `statut_diffusion ≠ O` ⇒ lead écarté avec motif | `tests/test_enrichment.py` |
 | Pas de données hors périmètre | `dirigeants` supprimé à la capture, absent du modèle | `tests/test_enrichment.py` |
+| Aucun modèle défini mais jamais construit | Audit du graphe d'appel : un symbole public sans appel ni justification échoue | `tests/test_symboles_morts.py` |
 
 La whitelist est vérifiée au **transport HTTP** et non dans une fonction
 utilitaire : à cet endroit, aucun chemin de code ne peut l'éviter — ni une
@@ -375,25 +376,34 @@ sur le 06, six mois, plus de 300 k€, limite par défaut (25) — **mesurée le
 2026-08-16** :
 
 ```
-458 annonces examinees, 49 classables, 333 sous le montant minimum,
-6 apport, 2 absent, 2 acte trop ancien, 1 societe cedante cessee.
-25 rendus sur 49 classables (limite atteinte) ; 65 candidats non enrichis
-donc non classes, faute de budget d'appels : relancer avec une limite plus
-haute pour les voir.
+662 annonces publiees, 600 rapatriees seulement (plafond de rapatriement
+atteint), 142 sans cedant ou illisibles, 458 exploitables, 49 classables,
+333 sous le montant minimum, 6 apport, 2 absent, 2 acte trop ancien,
+1 societe cedante cessee. 25 rendus sur 49 classables (limite atteinte) ;
+65 candidats non enrichis donc non classes, faute de budget d'appels :
+relancer avec une limite plus haute pour les voir.
 ```
 
-La deuxième phrase existe parce que la première ne suffisait pas. Elle sépare
-trois choses que le décompte confondait :
+C'est verbeux, et c'est le prix de l'exactitude. Ce résumé tenait auparavant en
+une ligne — « 458 annonces examinées, 5 classables » — dont **les deux nombres
+étaient faux au même titre** : chacun était compté après une coupe, sous un nom
+qui promettait la population entière.
 
-| | Sens |
-|---|---|
-| **écarté** | la grille ou le parser a **jugé** — il y a un motif |
-| **tronqué** | classable, mais hors des `limite` premiers |
-| **non enrichi** | jamais examiné : le budget d'appels API s'est arrêté avant |
+Cinq statuts, qu'un seul mot recouvrait :
 
-Seule la première catégorie est un refus. Les deux autres sont des effets de
-bord du budget, et les annoncer comme des refus attribuerait à la grille des
-décisions qu'elle n'a pas prises.
+| | Sens | Est-ce un refus ? |
+|---|---|---|
+| **publiée** | existe au BODACC sur la période | — |
+| **non rapatriée** | le plafond de 600 s'est arrêté avant | non, budget |
+| **sans cédant ou illisible** | écartée par le client BODACC — mise en activité, pas de cession | oui, filtre dur |
+| **écartée** | le parser ou la grille a **jugé** — il y a un motif | oui |
+| **tronquée** | classable, mais hors des `limite` premiers | non, budget |
+| **non enrichie** | jamais examinée : le budget d'appels s'est arrêté avant | non, budget |
+
+Trois de ces six lignes ne sont pas des refus. Les compter comme tels
+attribuerait à la grille des décisions qu'elle n'a jamais prises — et, dans
+l'autre sens, présenter 458 comme le total masquait que **69 % seulement de la
+population avait été regardée**.
 
 L'auditabilité construite dans le parser et la grille reste visible jusque dans
 le transport MCP — sinon elle n'existerait que dans les tests.
@@ -504,6 +514,27 @@ pour la démonstration est celui qu'un commercial pressé tenterait vraiment.
 
 Cette section est la plus importante du document. Un pipeline de prospection
 qui ne connaît pas ses angles morts en produit sans le savoir.
+
+### Le hook bloque `www.bodacc.fr`, et ce faux positif reste
+
+Le hook `PreToolUse` refuse tout appel réseau hors des deux domaines de la
+contrainte 2. Or les leads portent une URL de publication en
+`www.bodacc.fr` — le site de consultation, qui n'est **pas** l'API
+`bodacc-datadila.opendatasoft.com`. Coller un extrait contenant une de ces URL
+dans une invite déclenche donc un refus, alors que rien n'allait être appelé.
+
+**Ce faux positif est conservé délibérément.** Ajouter `www.bodacc.fr` à la
+liste pour se débarrasser d'une gêne, c'est ouvrir la porte au raisonnement qui
+suit — celui-ci est inoffensif, celui-là aussi, et la liste finit par ne plus
+rien garantir. **Un verrou avec des faux positifs assumés est plus solide qu'un
+verrou troué d'exceptions de confort**, parce que sa règle reste énonçable en
+une phrase : deux domaines, tout le reste lève.
+
+Le hook opère par ailleurs sur du texte, pas sur des intentions : il ne peut
+pas distinguer une URL qu'on s'apprête à appeler d'une URL qu'on cite. Cette
+imprécision est le prix de sa simplicité, et elle penche du bon côté.
+
+Sans effet sur `./demo.sh`, dont l'invocation ne contient aucune URL.
 
 ### Le projet documente sa source, il ne qualifie pas le traitement
 
@@ -707,11 +738,12 @@ il contient des réponses d'API avec des données personnelles réelles, et le
 | Commande | Ce qu'elle produit |
 |---|---|
 | `./demo.sh` | démonstration complète : pipeline, hook, transport, provenance |
-| `.venv/bin/python -m pytest -q` | 416 tests unitaires, sur fixtures figées, sans réseau |
+| `.venv/bin/python -m pytest -q` | 429 tests unitaires, sur fixtures figées, sans réseau |
 | `.venv/bin/python -m pytest -m network -q -s` | volume annuel, taux de parsing par segment, corrélation de rang |
 | `.venv/bin/python explore/dump_bodacc.py` | structure de la donnée, taux de présence du prix |
 | `.venv/bin/python explore/probe_origine_fonds.py` | les montants en francs, les annonces multi-établissements |
 | `.venv/bin/python tools/record_fixtures.py` | recapture les fixtures, anonymisées à l'écriture |
+| `.venv/bin/python tools/symboles_morts.py` | audit du code mort : symboles publics que rien ne construit |
 
 Chaque chiffre de ce README sort d'une de ces commandes.
 

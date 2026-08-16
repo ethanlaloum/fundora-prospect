@@ -131,8 +131,18 @@ def _resume(stats: dict[str, Any]) -> str:
     sortie parait exhaustive alors qu'elle est amputee, et le lecteur attribue
     a la grille des refus qu'elle n'a pas prononces.
     """
-    morceaux = [
-        f"{stats['annonces_examinees']} annonces examinees",
+    morceaux = [f"{stats['annonces_publiees']} annonces publiees"]
+    # Les reserves n'apparaissent que quand elles mordent : une mise en garde
+    # affichee en permanence cesse d'etre lue.
+    if stats["plafond_atteint"]:
+        morceaux.append(
+            f"{stats['annonces_rapatriees']} rapatriees seulement "
+            "(plafond de rapatriement atteint)"
+        )
+    if stats["sans_cedant_ou_illisibles"]:
+        morceaux.append(f"{stats['sans_cedant_ou_illisibles']} sans cedant ou illisibles")
+    morceaux += [
+        f"{stats['annonces_exploitables']} exploitables",
         f"{stats['leads_classables']} classables",
     ]
     morceaux += [f"{n} {motif}" for motif, n in stats["ecartes"].items()]
@@ -208,12 +218,13 @@ def search_liquidity_events(
         1,
     )
 
-    annonces = rechercher(
+    recherche = rechercher(
         departements=departements,
         depuis=debut,
         jusqu_a=aujourdhui,
         limite=PLAFOND_ANNONCES,
     )
+    annonces = recherche.annonces
 
     ecartes: dict[str, int] = {}
 
@@ -288,7 +299,14 @@ def search_liquidity_events(
     leads = leads[:limite]
 
     statistiques = {
-        "annonces_examinees": len(annonces),
+        # Trois populations, trois noms. `annonces_examinees` les confondait :
+        # il valait `annonces_exploitables` sous un nom qui promet le total.
+        # Mesure du 2026-08-16 sur le 06 : 662 / 600 / 458.
+        "annonces_publiees": recherche.publiees,
+        "annonces_rapatriees": recherche.rapatriees,
+        "annonces_exploitables": len(annonces),
+        "sans_cedant_ou_illisibles": recherche.non_exploitables,
+        "plafond_atteint": recherche.plafond_atteint,
         "candidats_avant_enrichissement": len(candidats),
         "enrichis": len(a_enrichir),
         "candidats_non_enrichis": len(candidats) - len(a_enrichir),
