@@ -9,7 +9,7 @@
       "name": "fundora-prospect",
       "description": "Detection et qualification de prospects investisseurs a partir des publications legales du BODACC. Aucun scraping : deux APIs publiques francaises, whitelist appliquee au transport HTTP et par un hook PreToolUse.",
       "source": ".",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "category": "productivity",
       "tags": ["bodacc", "prospection", "open-data", "rgpd", "mcp"]
     }

@@ -473,6 +473,40 @@ Un test lance la commande exacte de `.mcp.json` depuis une copie du plugin
 handshake MCP. C'est la vérification qui manquait quand le chemin de
 configuration a cassé en installation non-éditable.
 
+#### Mettre à jour : le cache est indexé par version
+
+**Pousser du code ne suffit pas à mettre à jour un plugin installé.** Le plugin
+est déposé dans `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, et
+ce chemin contient le **numéro de version**. Tant que `plugin.json` annonce la
+même version, l'installateur réutilise l'arbre déjà en cache — même après un
+`/plugin marketplace update` qui, lui, rafraîchit bien la source dans
+`~/.claude/plugins/marketplaces/`.
+
+Le symptôme est trompeur : le marketplace est à jour, le code sur GitHub est à
+jour, et le plugin exécuté reste l'ancien. On le repère à ce qui ne devrait
+plus être là — une description d'outil périmée, un fichier neuf absent.
+
+Donc : **toute modification livrée s'accompagne d'un incrément de version**,
+dans `plugin.json` *et* dans `marketplace.json`. Un test vérifie que les deux
+manifestes ne divergent pas.
+
+Deuxième piège, indépendant : `/plugin reload` ne tue pas le processus du
+serveur MCP déjà lancé. Après une mise à jour, il faut **redémarrer Claude
+Code** pour que le serveur reparte sur le nouveau code.
+
+Enfin, si l'interpréteur du `PATH` ne porte pas les trois dépendances, le venv
+doit être créé **dans le dossier du cache**, pas dans celui du marketplace :
+
+```
+V=~/.claude/plugins/cache/fundora/fundora-prospect/<version>
+python3 -m venv $V/.venv && $V/.venv/bin/pip install -e $V
+```
+
+Ce chemin change à chaque version. Sur une machine où l'on démontre souvent,
+mieux vaut exporter `FUNDORA_PYTHON` vers un interpréteur stable qui possède
+`httpx`, `pydantic` et `mcp` : le lanceur le consulte en premier, et il survit
+aux mises à jour.
+
 ### Deux verrous, deux périmètres
 
 La contrainte de whitelist est appliquée **deux fois**, à deux endroits qui ne
