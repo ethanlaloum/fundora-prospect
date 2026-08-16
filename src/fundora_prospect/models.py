@@ -16,7 +16,7 @@ from datetime import date
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from fundora_prospect.bodacc import Annonce
 
@@ -139,7 +139,17 @@ ScoreBreakdown = Evaluation
 
 
 class Provenance(BaseModel):
-    """Contrainte 3. Le controle a la serialisation arrive en Phase 3."""
+    """Contrainte 3 : d'ou vient ce lead, et quel segment il concerne.
+
+    Les validateurs ne sont pas une precaution de style. Pydantic rend le champ
+    **obligatoire** ; sans eux, `source=""` satisferait le type et la
+    tracabilite serait declarative — le champ present, et muet. La contrainte
+    dit « ne doit pas POUVOIR etre serialise », ce qui exige que la valeur soit
+    controlee, pas seulement sa presence.
+
+    Le texte des bases legales vit dans `provenance.py`, pas ici : c'est une
+    decision de conformite, pas une propriete du modele.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -148,8 +158,36 @@ class Provenance(BaseModel):
     date_collecte: date
     url_publication: str
 
+    @field_validator("source", "base_legale", "url_publication")
+    @classmethod
+    def _non_vide(cls, valeur: str, info: ValidationInfo) -> str:
+        if not valeur.strip():
+            raise ValueError(
+                f"{info.field_name} est vide : un lead sans provenance complete "
+                "ne peut pas etre serialise (contrainte 3)"
+            )
+        return valeur.strip()
+
+    @field_validator("url_publication")
+    @classmethod
+    def _url_absolue(cls, valeur: str) -> str:
+        """Une provenance doit etre verifiable par un tiers. Un chemin relatif
+        ne permet pas de remonter a l'annonce publiee."""
+        if not valeur.startswith(("http://", "https://")):
+            raise ValueError(
+                f"url_publication n'est pas une URL absolue : {valeur!r}. "
+                "Une provenance doit pouvoir etre ouverte telle quelle."
+            )
+        return valeur
+
 
 class Lead(BaseModel):
+    """Un evenement, ce que la grille en dit, et d'ou il vient.
+
+    `provenance` n'a pas de valeur par defaut : c'est ce qui rend impossible la
+    construction d'un lead intracable.
+    """
+
     model_config = ConfigDict(frozen=True)
 
     event: LiquidityEvent

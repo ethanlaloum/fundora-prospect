@@ -31,8 +31,11 @@ inférence trop faible — et sur des personnes que l'annonce ne nomme pas.
 Conséquences :
 
 - **Segment principal : cédant personne morale toujours active.** Prospection
-  B2B, intérêt légitime solide, **~898 cas/an en PACA** (mesuré Phase 1).
+  B2B, **~898 cas/an en PACA** (mesuré Phase 1).
   Société active = trésorerie encore au bilan, à placer.
+  *Cette ligne portait « intérêt légitime solide » jusqu'à la Phase 3 bis.
+  Retiré : le projet ne qualifie pas la base de traitement, il documente sa
+  source. Voir le champ `base_legale` en Phase 3 bis.*
   *Ne pas confondre avec les ~1 046/an, qui comptent **tous** les cédants —
   voir l'attribution du volume plus bas.*
 - **Segment secondaire : cédant personne physique.** ~135 cas/an en PACA.
@@ -298,6 +301,11 @@ Règles de test :
 - Les tests réseau sont marqués `@pytest.mark.network` et exclus par défaut.
 - Si un test échoue, tu corriges le code, pas le test — sauf si le test est
   faux, et alors tu me l'expliques d'abord.
+- **Un test qui garde une contrainte se vérifie par mutation.** On altère
+  délibérément l'implémentation et on confirme que le test échoue. Un test vert
+  ne prouve rien tant qu'on ne l'a pas vu rougir : c'est la seule façon de
+  distinguer un garde-fou d'un test décoratif. Un cas s'est déjà produit sur ce
+  projet (« vacuous test », commit `0dfda0c`).
 
 Ne crée pas de fichier dont on n'a pas besoin dans la phase courante.
 
@@ -550,26 +558,62 @@ Mesures : sections I 52,4 % / G 21,0 % / C 10,5 % / L 8,6 %. **Section K = 0 %**
 inexistante, la règle n'a pas été implémentée. Statuts : 69,7 % actives,
 26,1 % inconnues, 4,2 % cessées.
 
-### Phase 3 bis — Provenance (non faite)
-`enrichment.py` : appel à `recherche-entreprises.api.gouv.fr` par SIREN.
+### Phase 3 bis — Provenance ✅ FAIT
 
-**L'enrichissement n'est pas ce qui crée le lead** — BODACC fournit déjà SIREN
-et raison sociale du cédant, donc le lead existe sans cette phase. C'est un
-**affineur de score**, avec un usage prioritaire qui vaut à lui seul plus que
-tout le reste :
+`provenance.py` : la traçabilité, appliquée à la sérialisation.
 
-> **La société cédante est-elle toujours active ?**
-> Active → la trésorerie de cession est encore au bilan, à placer : c'est le
-> prospect. Radiée → le cash est descendu aux associés, la personne morale
-> n'est plus prospect et le scoring doit être différent.
+**Une porte de sortie unique, pas une fonction d'aide.** `serialiser` n'accepte
+qu'un `Lead`, donc une `Provenance` validée. Le contrôle de type n'est pas de
+la défense d'usage : c'est lui qui ferme le contournement. Tant qu'un second
+chemin existe — un dict monté à la main à côté — la contrainte ne vaut que par
+la discipline de celui qui écrit le prochain appel.
 
-Le reste de l'enrichissement (activité, effectif, date de création) est
-secondaire. Vérifier aussi le statut de diffusion INSEE : une entreprise non
-diffusible est écartée.
+**Le défaut corrigé était exactement celui-là.** `Provenance` et `Lead`
+existaient depuis la Phase 2 mais n'étaient construits nulle part : le serveur
+MCP assemblait sa réponse à la main et n'y mettait qu'**un** des quatre champs
+(`url_publication`). La contrainte 3 était documentée, testée nulle part, et
+fausse en production. *Un modèle défini n'est pas une garantie tant que rien
+n'oblige à passer par lui* — à rapprocher de la leçon « un tri en amont est un
+filtre » : dans les deux cas, le code réel contournait la règle écrite.
 
-`provenance.py` : la traçabilité, appliquée à la sérialisation. Un `Lead`
-incomplet doit lever une erreur de validation.
-Gate : un test prouve qu'un lead sans provenance ne peut pas être exporté.
+Les quatre champs sont obligatoires **et non vides** : `""` satisfait le type
+`str` et passerait le contrôle d'obligation, laissant un champ présent et muet.
+L'URL doit être absolue, sinon la provenance n'est pas vérifiable par un tiers.
+
+Un lead qui échoue au contrôle **sort du flux avec son motif**
+(`provenance incomplete`), au même titre qu'un apport ou une société radiée.
+Ni rendu sans provenance, ni perdu en silence, ni propagé en exception jusqu'au
+client MCP.
+
+#### `base_legale` est descriptif, jamais une qualification juridique
+
+**Décision explicite, verrouillée par un test.** Le champ dit d'où vient la
+donnée et quel segment elle concerne — deux choses vérifiables. Il ne nomme
+aucune base de traitement et ne cite aucun article.
+
+Qualifier un traitement relève du **DPO de l'exploitant**, qui seul connaît la
+finalité réelle, les durées de conservation et l'information des personnes. Une
+formulation juridique assurée, écrite ici par un outil de détection, donnerait
+l'apparence d'une analyse qui n'a pas eu lieu : c'est un risque pour
+l'exploitant, pas une garantie.
+
+Le test interdit `rgpd`, `article` et `intérêt légitime` dans le champ, pour
+tous les types de cédant. Sans lui, la première relecture qui trouve le champ
+« trop vague » y remettrait une citation.
+
+La formule « intérêt légitime solide » figurait dans la section « Cible » de ce
+fichier et dans le README ; elle a été retirée des deux au même moment. La
+laisser aurait garanti la dérive : un vocabulaire disponible dans le document
+de référence finit par descendre dans un champ exporté, et le test l'aurait
+alors bloqué sans que personne comprenne pourquoi.
+
+Trois segments, trois textes distincts : personne morale (B2B), personne
+physique (« qualification à établir avant toute utilisation »), et type non
+renseigné — qui retombe sur le traitement prudent, parce qu'un segment qu'on ne
+sait pas nommer n'est pas du B2B établi.
+
+Gate : ✅ un test prouve qu'un lead sans provenance ne peut pas être exporté.
+Vérifié par mutation — cinq altérations de l'implémentation, cinq détectées.
 
 ### Phase 4 — Serveur MCP ✅ FAIT
 

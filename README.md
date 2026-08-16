@@ -101,7 +101,8 @@ Noter la structure : l'annonce est celle d'un **achat**, et le prospect est le
 `listeprecedentproprietaire` — la boulangerie qui vient de vendre, pas
 l'acquéreur.
 
-Ce que le pipeline en tire, avec le détail du calcul :
+Ce que le pipeline en tire, avec le détail du calcul — **sortie réelle, calculée
+le 2026-08-16** :
 
 ```
 LiquidityEvent  A20260153319
@@ -110,15 +111,27 @@ LiquidityEvent  A20260153319
   acte          2026-07-25   parution 2026-08-13   écart 19 jours
   statut        ACTIVE — société active, trésorerie de cession au bilan
   activité      APE 10.71C   section C
-  provenance    https://www.bodacc.fr/...?q.id=id:A20260153319
 
-Score 73,20 / 100
+Score 73,04 / 100
   montant       31,70 pts   185 000 EUR, échelle log entre 10 000 et 1 580 000 EUR
-  fraîcheur     41,50 pts   21 jours depuis la date d'acte ; décroissance demi-vie
+  fraîcheur     41,34 pts   22 jours depuis la date d'acte ; décroissance demi-vie
                             dès le premier jour, demi-vie 180 jours
   secteur        0,00 pts   code APE 10.71C hors liste prioritaire ; poids 0
   département    0,00 pts   département 13 ; poids 0 — périmètre PACA homogène
+
+Provenance
+  source        BODACC — Bulletin officiel des annonces civiles et commerciales
+                (DILA), consulté via l'API publique bodacc-datadila.opendatasoft.com
+  base légale   Donnée issue d'une publication légale obligatoire au BODACC
+                (DILA), concernant une personne morale, exploitée dans un
+                contexte de prospection B2B.
+  collecte      2026-08-16
+  publication   https://www.bodacc.fr/...?q.id=id:A20260153319
 ```
+
+La date de calcul est indiquée parce que **le score bouge avec elle** : la
+fraîcheur décroît dès le premier jour, donc le même événement vaudra moins
+demain. Un score affiché sans sa date est un chiffre détaché de son référent.
 
 Le statut `ACTIVE` est ce qui autorise ce lead à être classé : une société
 radiée sort du classement avec son motif, parce que son produit de cession est
@@ -127,6 +140,10 @@ déjà descendu aux associés.
 Chaque point est justifié, y compris les critères qui ne rapportent rien. Aucun
 score ne sort sans son détail, et `somme(contributions) == score` est vérifié
 par un test.
+
+**Le bloc `provenance` n'est pas décoratif.** Les quatre champs de la
+contrainte 3 y sont obligatoires, et un lead qui n'arrive pas à les remplir
+n'est pas exporté — voir [Traçabilité](#conformité) plus bas.
 
 ### Ce que cet outil ne fait pas
 
@@ -158,8 +175,13 @@ l'annonce ne nomme même pas.
 
 **Ce que ça coûte.** Le recentrage écarte **14 %** du volume : de ~1 046
 cessions > 200 k€ tous cédants confondus, à ~900 avec un cédant personne
-morale. En échange : prospection B2B, intérêt légitime solide, aucune
-inférence sur des personnes physiques.
+morale. En échange : une prospection B2B qui ne repose sur aucune inférence
+concernant des personnes physiques — ni sur leur identité, que l'annonce ne
+donne pas, ni sur ce qu'elles auraient perçu.
+
+*Le raisonnement s'arrête là.* Dire que ce recentrage rend la base « solide »
+serait une qualification juridique, et le projet n'en produit pas — voir
+[Limites connues](#le-projet-documente-sa-source-il-ne-qualifie-pas-le-traitement).
 
 > Les cédants personnes physiques (~135/an) sont conservés comme **segment
 > secondaire**, explicitement marqué dans le modèle comme relevant d'une base
@@ -216,7 +238,7 @@ une case à cocher en fin de projet, c'est une contrainte d'architecture.
 |---|---|---|
 | Aucun scraping | Deux APIs publiques documentées, aucun HTML parsé | — |
 | Domaines autorisés en dur | `TransportWhitelist` : lève **avant** d'ouvrir la connexion | `tests/test_http.py` |
-| Traçabilité de chaque lead | `url_complete`, SIREN et date fournis nativement par l'annonce | `tests/test_bodacc.py` |
+| Traçabilité de chaque lead | Porte de sortie unique : `provenance.serialiser`, qui n'accepte qu'un `Lead` complet | `tests/test_provenance.py` |
 | Zéro donnée personnelle au dépôt | Liste blanche + substitution à la capture + hook `pre-commit` | `tests/test_anonymisation.py` |
 | Base légale par segment | `type_personne` porté jusqu'au lead, jamais dans le score | `tests/test_bodacc.py` |
 | Scoring explicable | `somme(contributions) == score`, motif obligatoire par critère | `tests/test_scoring.py` |
@@ -228,8 +250,56 @@ utilitaire : à cet endroit, aucun chemin de code ne peut l'éviter — ni une
 redirection 302 vers l'extérieur, ni un sous-domaine, ni une URL construite
 dynamiquement.
 
-Les entreprises non diffusibles au sens INSEE seront écartées à
+Les entreprises non diffusibles au sens INSEE sont écartées à
 l'enrichissement.
+
+### La traçabilité est une porte, pas une convention
+
+La contrainte 3 dit qu'un lead sans provenance complète « ne doit pas **pouvoir**
+être sérialisé ». C'est plus fort que « ne devrait pas », et ça change
+l'implémentation : il ne suffit pas que le chemin nominal remplisse les quatre
+champs, il faut qu'aucun chemin ne les contourne.
+
+Le pipeline a donc **une seule sortie**, `provenance.serialiser`, qui n'accepte
+qu'un objet `Lead` — donc une `Provenance` validée. Les quatre champs y sont
+obligatoires *et* non vides : un champ obligatoire rempli par `""` satisfait le
+type et trahit la contrainte. L'URL de publication doit être absolue, sinon la
+provenance n'est pas vérifiable par un tiers.
+
+Un lead qui échoue à ce contrôle **sort du flux avec son motif**, exactement
+comme un apport en nature ou une société radiée : `provenance incomplete`
+apparaît dans le décompte des refus. Ni rendu sans provenance, ni perdu en
+silence.
+
+> **Comment ce défaut existait.** Les classes `Provenance` et `Lead` étaient
+> écrites depuis la Phase 2, mais construites nulle part : le serveur MCP
+> assemblait sa réponse à la main et n'y mettait qu'un des quatre champs. La
+> contrainte était documentée, jamais exécutée. Un modèle défini n'est pas une
+> garantie tant que rien n'oblige à passer par lui.
+
+**Le champ `base_legale` est descriptif, pas une qualification juridique.** Il
+dit d'où vient la donnée et quel segment elle concerne — deux choses
+vérifiables. Il ne nomme aucune base de traitement et ne cite aucun article.
+
+C'est délibéré. Qualifier un traitement relève du **DPO de l'exploitant**, qui
+seul connaît la finalité réelle, les durées de conservation et l'information
+des personnes. Une formulation juridique assurée, écrite par un outil de
+détection, donnerait l'apparence d'une analyse qui n'a pas eu lieu : c'est un
+risque pour l'exploitant, pas une garantie. Le projet documente sa source et ne
+préjuge pas de sa qualification. Un test verrouille la décision — sans lui, la
+première relecture qui trouve le champ « trop vague » y remettrait une citation.
+
+La distinction des deux segments, en revanche, est structurante et portée par
+le champ :
+
+| Segment | `base_legale` |
+|---|---|
+| Cédant personne morale | publication légale obligatoire au BODACC, personne morale, contexte de prospection B2B |
+| Cédant personne physique | même source, personne physique — **segment distinct du B2B, qualification à établir avant toute utilisation** |
+| Type non renseigné | même source, **segment non qualifié** — repli prudent : ce qu'on ne sait pas nommer n'est pas du B2B établi |
+
+Un export qui mélange les deux premiers sans ce champ est précisément ce que le
+projet s'interdit.
 
 ---
 
@@ -260,6 +330,10 @@ l'enrichissement.
         ▼
   scoring.py       grille de pondération ← config/ponderation.toml (dans le paquet)
         │          → non retenu ou aberrant : hors classement, avec motif
+        ▼
+  provenance.py    PORTE DE SORTIE UNIQUE — n'accepte qu'un Lead complet
+        │          source / base légale / date de collecte / URL, non vides
+        │          → provenance incomplète : hors classement, avec motif
         ▼
   Lead + ScoreBreakdown
         │
@@ -306,6 +380,13 @@ sur le 06, six mois, plus de 300 k€ :
 
 L'auditabilité construite dans le parser et la grille reste visible jusque dans
 le transport MCP — sinon elle n'existerait que dans les tests.
+
+**Chaque lead rendu porte son bloc `provenance`** : source, base légale du
+segment, date de collecte, URL de l'annonce. Le serveur ne construit plus la
+charge utile lui-même, il passe par la porte unique décrite en
+[Conformité](#la-traçabilité-est-une-porte-pas-une-convention) ; un lead qui
+n'arrive pas à la franchir est compté dans les refus sous le motif
+`provenance incomplete`.
 
 **Un détail de conception qui compte.** L'enrichissement coûte un appel API par
 lead, donc seul le haut du panier est enrichi. Ce pré-classement se fait sur le
@@ -398,6 +479,31 @@ pour la démonstration est celui qu'un commercial pressé tenterait vraiment.
 
 Cette section est la plus importante du document. Un pipeline de prospection
 qui ne connaît pas ses angles morts en produit sans le savoir.
+
+### Le projet documente sa source, il ne qualifie pas le traitement
+
+**La qualification de la base de traitement relève du DPO de l'exploitant.**
+Ce projet établit et transporte la provenance de chaque lead — quelle
+publication légale, quelle date de collecte, quelle URL, quel segment — et
+n'en préjuge pas.
+
+C'est une limite assumée, pas un oubli. Nommer une base de traitement suppose
+de connaître la finalité poursuivie, les durées de conservation retenues et les
+modalités d'information des personnes : trois choses qui appartiennent à
+l'exploitant, pas à l'outil de détection. Le champ `base_legale` est donc
+**descriptif** — il dit d'où vient la donnée et quel segment elle concerne.
+
+Ce que ça implique concrètement pour qui reprend le projet :
+
+- le segment **personne physique** est signalé comme distinct de la
+  prospection B2B, et sa qualification est à établir **avant** toute
+  exploitation ;
+- un cédant dont le type n'est pas renseigné retombe sur le même traitement
+  prudent ;
+- rien dans la sortie ne doit être lu comme une validation de conformité.
+
+Un outil qui affirmerait sa propre conformité serait moins fiable qu'un outil
+qui rend sa provenance vérifiable. C'est le second qui est implémenté ici.
 
 ### Le champ `origineFonds` peut décrire une transaction antérieure
 

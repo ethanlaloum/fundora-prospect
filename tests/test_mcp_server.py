@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -24,9 +25,10 @@ from mcp.client.session import ClientSession
 from mcp.shared.memory import create_client_server_memory_streams
 
 from fundora_prospect import mcp_server
-from fundora_prospect.bodacc import construire_annonce
+from fundora_prospect.bodacc import Annonce, Cedant, construire_annonce
 from fundora_prospect.enrichment import Enrichissement
 from fundora_prospect.models import StatutEntreprise
+from fundora_prospect.prix import Confiance, PrixCession, Qualification
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -34,6 +36,37 @@ FIXTURES = Path(__file__).parent / "fixtures"
 def annonces_de(nom: str) -> list:
     charge = json.loads((FIXTURES / f"{nom}.json").read_text(encoding="utf-8"))
     return [a for brut in charge if (a := construire_annonce(brut)) is not None]
+
+
+def fabriquer_annonce(
+    identifiant: str,
+    montant: float,
+    jours: int,
+    type_personne: str = "pm",
+    url: str | None = None,
+) -> Annonce:
+    """Annonce synthetique, pour les cas que les fixtures ne contiennent pas :
+    un couple montant/fraicheur choisi, ou une provenance amputee."""
+    acte = date.today() - timedelta(days=jours)
+    return Annonce(
+        id=identifiant,
+        date_parution=acte,
+        date_acte=acte,
+        departement="06",
+        url_publication=f"https://www.bodacc.fr/x/{identifiant}" if url is None else url,
+        categorie_vente=None,
+        activite=None,
+        cedant=Cedant(denomination=identifiant, type_personne=type_personne, siren="852872563"),
+        prix=PrixCession(
+            montant=montant,
+            devise="EUR",
+            qualification=Qualification.ACHAT,
+            methode="test",
+            texte_source="",
+            confiance=Confiance.ACTE_DATE,
+            ecart_acte_jours=0,
+        ),
+    )
 
 
 def appeler(outil: str, arguments: dict[str, Any]) -> Any:
@@ -174,6 +207,70 @@ def test_une_societe_cessee_est_ecartee_et_comptee(sans_reseau) -> None:
     charge = appeler("search_liquidity_events", {"departement": "13"}).structured_content
     assert charge["leads"] == []
     assert any("cess" in motif.lower() for motif in charge["statistiques"]["ecartes"])
+
+
+def test_chaque_lead_rendu_porte_sa_provenance_complete(sans_reseau) -> None:
+    """Contrainte 3, verifiee la ou elle compte : dans le transport. Les tests
+    de `test_provenance.py` prouvent qu'un lead incomplet ne se serialise pas ;
+    celui-ci prouve que le serveur passe bien par cette porte-la."""
+    sans_reseau()
+    charge = appeler("search_liquidity_events", {"departement": "13"}).structured_content
+
+    assert charge["leads"], "aucun lead rendu"
+    for lead in charge["leads"]:
+        provenance = lead["provenance"]
+        assert set(provenance) == {"source", "base_legale", "date_collecte", "url_publication"}
+        assert all(str(v).strip() for v in provenance.values())
+        assert provenance["url_publication"].startswith("https://www.bodacc.fr/")
+        assert provenance["date_collecte"] == date.today().isoformat()
+
+
+def test_la_provenance_distingue_les_deux_segments(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un export qui melange personne morale et personne physique sans le champ
+    qui les separe est precisement ce que CLAUDE.md interdit."""
+    corpus = [
+        fabriquer_annonce("SOCIETE-CEDANTE", 300_000, 10, type_personne="pm"),
+        fabriquer_annonce("COMMERCANT-CEDANT", 300_000, 10, type_personne="pp"),
+    ]
+    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: corpus)
+    monkeypatch.setattr(
+        mcp_server,
+        "enrichir",
+        lambda siren, **_: Enrichissement(
+            siren=str(siren or ""), statut=StatutEntreprise.ACTIVE, motif="fixture"
+        ),
+    )
+
+    charge = appeler("search_liquidity_events", {"departement": "06"}).structured_content
+    bases = {lead["cedant"]: lead["provenance"]["base_legale"] for lead in charge["leads"]}
+    assert len(bases) == 2
+    assert bases["SOCIETE-CEDANTE"] != bases["COMMERCANT-CEDANT"]
+    assert "qualification" in bases["COMMERCANT-CEDANT"].lower()
+
+
+def test_une_annonce_sans_url_est_ecartee_et_non_rendue_sans_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`url_complete` est replie sur `""` par le client quand il manque. Le lead
+    doit alors sortir du flux AVEC SON MOTIF — ni rendu sans provenance, ni
+    perdu en silence, ni propage en exception jusqu'au client MCP."""
+    corpus = [
+        fabriquer_annonce("TRACABLE", 300_000, 10),
+        fabriquer_annonce("SANS-URL", 900_000, 5, url=""),
+    ]
+    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: corpus)
+    monkeypatch.setattr(
+        mcp_server,
+        "enrichir",
+        lambda siren, **_: Enrichissement(
+            siren=str(siren or ""), statut=StatutEntreprise.ACTIVE, motif="fixture"
+        ),
+    )
+
+    charge = appeler("search_liquidity_events", {"departement": "06"}).structured_content
+    rendus = {lead["cedant"] for lead in charge["leads"]}
+    assert rendus == {"TRACABLE"}, "un lead intracable ne doit pas sortir"
+    assert any("provenance" in motif for motif in charge["statistiques"]["ecartes"])
 
 
 def test_le_montant_minimum_filtre(sans_reseau) -> None:
@@ -323,38 +420,9 @@ def test_le_preclassement_ne_trie_pas_sur_le_montant_seul(
     Ici, la cession la plus recente a le montant le PLUS FAIBLE. Avec une
     limite de 1, elle doit quand meme sortir.
     """
-    from datetime import date, timedelta
-
-    from fundora_prospect.bodacc import Annonce, Cedant
-    from fundora_prospect.prix import Confiance, PrixCession, Qualification
-
-    aujourdhui = date.today()
-
-    def fabriquer(identifiant: str, montant: float, jours: int) -> Annonce:
-        acte = aujourdhui - timedelta(days=jours)
-        return Annonce(
-            id=identifiant,
-            date_parution=acte,
-            date_acte=acte,
-            departement="06",
-            url_publication=f"https://www.bodacc.fr/x/{identifiant}",
-            categorie_vente=None,
-            activite=None,
-            cedant=Cedant(denomination=identifiant, type_personne="pm", siren="852872563"),
-            prix=PrixCession(
-                montant=montant,
-                devise="EUR",
-                qualification=Qualification.ACHAT,
-                methode="test",
-                texte_source="",
-                confiance=Confiance.ACTE_DATE,
-                ecart_acte_jours=0,
-            ),
-        )
-
     corpus = [
-        fabriquer("GROSSE-ET-VIEILLE", 1_500_000, 900),
-        fabriquer("MODESTE-ET-FRAICHE", 260_000, 5),
+        fabriquer_annonce("GROSSE-ET-VIEILLE", 1_500_000, 900),
+        fabriquer_annonce("MODESTE-ET-FRAICHE", 260_000, 5),
     ]
     monkeypatch.setattr(mcp_server, "rechercher", lambda **_: corpus)
     monkeypatch.setattr(

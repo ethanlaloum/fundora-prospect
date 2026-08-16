@@ -19,6 +19,11 @@ unites, et le fait que les resultats sortent deja tries.
 **La sortie porte les motifs de refus**, pas seulement les leads retenus.
 L'auditabilite construite depuis la Phase 1 doit etre visible dans le transport
 MCP, sinon elle n'existe que dans les tests.
+
+**Les leads sortent par `provenance.serialiser`, jamais par un dict monte a la
+main.** Ce module a longtemps construit lui-meme la charge utile, et elle ne
+portait qu'un des quatre champs de tracabilite exiges par la contrainte 3. La
+porte unique est ce qui rend la contrainte verifiable ici.
 """
 
 from __future__ import annotations
@@ -27,8 +32,9 @@ from datetime import date
 from typing import Any
 
 from mcp.server import MCPServer
+from pydantic import ValidationError
 
-from fundora_prospect import __version__
+from fundora_prospect import __version__, provenance
 from fundora_prospect.bodacc import DEPARTEMENTS_PACA, Annonce, rechercher
 from fundora_prospect.enrichment import enrichir, siren_valide
 from fundora_prospect.models import LiquidityEvent, StatutEntreprise
@@ -118,33 +124,6 @@ def _date(brut: str | None, nom: str) -> date | None:
 # --- Mise en forme -------------------------------------------------------------
 
 
-def _lead(annonce: Annonce, event: LiquidityEvent, evaluation: Any) -> dict[str, Any]:
-    return {
-        "score": evaluation.score,
-        "cedant": event.cedant_denomination,
-        "siren": event.cedant_siren,
-        "type_cedant": str(event.cedant_type),
-        "montant_eur": event.montant_eur,
-        "date_acte": event.date_acte.isoformat() if event.date_acte else None,
-        "date_parution": event.date_parution.isoformat(),
-        "departement": event.departement,
-        "statut_cedant": str(event.statut_cedant),
-        "statut_motif": event.motif_enrichissement,
-        "code_ape": event.code_ape,
-        "section_ape": event.section_ape,
-        "url_publication": event.url_publication,
-        "breakdown": [
-            {
-                "critere": c.critere,
-                "points": c.points,
-                "poids": c.poids,
-                "motif": c.motif,
-            }
-            for c in evaluation.contributions
-        ],
-    }
-
-
 def _resume(stats: dict[str, Any]) -> str:
     morceaux = [
         f"{stats['annonces_examinees']} annonces examinees",
@@ -176,7 +155,12 @@ def _resume(stats: dict[str, Any]) -> str:
         "- limite : nombre maximum de leads rendus (defaut 25, maximum 100).\n\n"
         "La reponse contient aussi le decompte des annonces ecartees AVEC LEUR "
         "MOTIF : apport en nature, devise obsolete, societe cedante radiee, acte "
-        "trop ancien. Ces refus font partie du resultat."
+        "trop ancien. Ces refus font partie du resultat.\n\n"
+        "Chaque lead porte un bloc `provenance` : source, date de collecte, URL "
+        "de l'annonce publiee, et le segment concerne. Les cedants personne "
+        "physique relevent d'un segment distinct de la prospection B2B — le "
+        "bloc le dit, et cette distinction doit etre conservee si les leads "
+        "sont recopies ou resumes."
     )
 )
 def search_liquidity_events(
@@ -260,7 +244,17 @@ def search_liquidity_events(
             else:
                 ecarter("non classable")
             continue
-        leads.append(_lead(annonce, event, evaluation))
+
+        # Porte unique de sortie : `assembler` leve si la provenance est
+        # incomplete (contrainte 3). Un lead intracable sort du flux avec son
+        # motif, comme n'importe quel autre refus — il n'est ni rendu sans
+        # provenance, ni perdu en silence.
+        try:
+            lead = provenance.assembler(event, evaluation, date_collecte=aujourdhui)
+        except ValidationError:
+            ecarter("provenance incomplete")
+            continue
+        leads.append(provenance.serialiser(lead))
 
     leads.sort(key=lambda lead: lead["score"], reverse=True)
     leads = leads[:limite]
