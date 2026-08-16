@@ -289,6 +289,64 @@ def test_la_limite_borne_le_nombre_de_leads(sans_reseau) -> None:
     assert len(charge["leads"]) <= 1
 
 
+def test_la_troncature_ne_se_compte_pas_comme_un_refus(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`leads_classables` doit compter ce que la grille a juge classable, pas
+    ce qui reste apres la coupe a `limite`.
+
+    Confondre les deux fait passer une troncature pour un jugement : un lecteur
+    qui lit « 25 classables » sur 115 candidats conclut que la grille en a
+    rejete 90, alors qu'elle n'en a jamais vu que 50 et n'en a refuse aucun.
+    Le resume est recopie tel quel a l'utilisateur — c'est la que le chiffre
+    detache de son referent se propage.
+    """
+    corpus = [fabriquer_annonce(f"CEDANT-{i}", 300_000 + i * 1_000, 10) for i in range(6)]
+    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: corpus)
+    monkeypatch.setattr(
+        mcp_server,
+        "enrichir",
+        lambda siren, **_: Enrichissement(
+            siren=str(siren or ""), statut=StatutEntreprise.ACTIVE, motif="fixture"
+        ),
+    )
+
+    charge = appeler(
+        "search_liquidity_events", {"departement": "06", "limite": 1}
+    ).structured_content
+    stats = charge["statistiques"]
+
+    # limite=1 => 2 enrichis, tous deux classables, 1 seul rendu.
+    assert stats["leads_rendus"] == 1
+    assert stats["leads_classables"] == 2
+    assert stats["ecartes"].get("non classable", 0) == 0, "aucun refus de la grille ici"
+    assert "1 rendus sur 2 classables" in charge["resume"]
+
+
+def test_les_candidats_jamais_enrichis_sont_annonces(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un candidat non enrichi n'est ni refuse ni rendu : il est invisible.
+    Le resume doit le dire, sinon la sortie parait exhaustive alors qu'elle est
+    amputee — c'est la lecon « un tri en amont est un filtre », appliquee au
+    compte rendu."""
+    corpus = [fabriquer_annonce(f"CEDANT-{i}", 300_000 + i * 1_000, 10) for i in range(9)]
+    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: corpus)
+    monkeypatch.setattr(
+        mcp_server,
+        "enrichir",
+        lambda siren, **_: Enrichissement(
+            siren=str(siren or ""), statut=StatutEntreprise.ACTIVE, motif="fixture"
+        ),
+    )
+
+    charge = appeler(
+        "search_liquidity_events", {"departement": "06", "limite": 2}
+    ).structured_content
+    stats = charge["statistiques"]
+
+    assert stats["candidats_avant_enrichissement"] == 9
+    assert stats["enrichis"] == 4
+    assert stats["candidats_non_enrichis"] == 5
+    assert "5 candidats non enrichis" in charge["resume"]
+
+
 # --- Normalisation des parametres --------------------------------------------
 
 

@@ -371,12 +371,29 @@ dizaines d'allers-retours, lents et impossibles à démontrer en direct. Un appe
 suffit ; les deux autres outils restent là pour inspecter un cas précis.
 
 **La réponse porte les motifs de refus, pas seulement les leads.** Sortie réelle
-sur le 06, six mois, plus de 300 k€ :
+sur le 06, six mois, plus de 300 k€, limite par défaut (25) — **mesurée le
+2026-08-16** :
 
 ```
-458 annonces examinees, 5 classables, 333 sous le montant minimum,
-6 apport, 2 absent, 2 acte trop ancien.
+458 annonces examinees, 49 classables, 333 sous le montant minimum,
+6 apport, 2 absent, 2 acte trop ancien, 1 societe cedante cessee.
+25 rendus sur 49 classables (limite atteinte) ; 65 candidats non enrichis
+donc non classes, faute de budget d'appels : relancer avec une limite plus
+haute pour les voir.
 ```
+
+La deuxième phrase existe parce que la première ne suffisait pas. Elle sépare
+trois choses que le décompte confondait :
+
+| | Sens |
+|---|---|
+| **écarté** | la grille ou le parser a **jugé** — il y a un motif |
+| **tronqué** | classable, mais hors des `limite` premiers |
+| **non enrichi** | jamais examiné : le budget d'appels API s'est arrêté avant |
+
+Seule la première catégorie est un refus. Les deux autres sont des effets de
+bord du budget, et les annoncer comme des refus attribuerait à la grille des
+décisions qu'elle n'a pas prises.
 
 L'auditabilité construite dans le parser et la grille reste visible jusque dans
 le transport MCP — sinon elle n'existerait que dans les tests.
@@ -387,6 +404,14 @@ charge utile lui-même, il passe par la porte unique décrite en
 [Conformité](#la-traçabilité-est-une-porte-pas-une-convention) ; un lead qui
 n'arrive pas à la franchir est compté dans les refus sous le motif
 `provenance incomplete`.
+
+Sur la mesure ci-dessus, **`provenance incomplete` vaut 0 sur 458 annonces
+examinées, et les 25 leads rendus portent les quatre champs**. C'est le
+résultat attendu — `url_complete` est fourni nativement par BODACC — mais il
+est *mesuré*, pas déduit. La différence n'est pas rhétorique : les trois
+défauts les plus coûteux de ce projet (test à vide, pré-classement biaisé,
+modèle jamais construit) ont tous survécu parce qu'un raisonnement plausible
+avait tenu lieu de vérification.
 
 **Un détail de conception qui compte.** L'enrichissement coûte un appel API par
 lead, donc seul le haut du panier est enrichi. Ce pré-classement se fait sur le
@@ -681,8 +706,8 @@ il contient des réponses d'API avec des données personnelles réelles, et le
 
 | Commande | Ce qu'elle produit |
 |---|---|
-| `./demo.sh` | démonstration complète : pipeline, hook, transport |
-| `.venv/bin/python -m pytest -q` | 371 tests unitaires, sur fixtures figées, sans réseau |
+| `./demo.sh` | démonstration complète : pipeline, hook, transport, provenance |
+| `.venv/bin/python -m pytest -q` | 416 tests unitaires, sur fixtures figées, sans réseau |
 | `.venv/bin/python -m pytest -m network -q -s` | volume annuel, taux de parsing par segment, corrélation de rang |
 | `.venv/bin/python explore/dump_bodacc.py` | structure de la donnée, taux de présence du prix |
 | `.venv/bin/python explore/probe_origine_fonds.py` | les montants en francs, les annonces multi-établissements |

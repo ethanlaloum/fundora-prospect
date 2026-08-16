@@ -489,6 +489,28 @@ valeur avait survécu au changement de sa source.
    code : la documentation les recopie, donc elle dérive. Les recontrôler fait
    partie de la relecture finale, pas de la bonne volonté.
 
+### Leçon générale : un symbole jamais construit échappe à tous les tests
+
+`Provenance` et `Lead` étaient du code mort depuis la Phase 2. **416 tests ne
+l'ont pas signalé**, et c'est structurel : un test ne peut pas échouer sur du
+code qu'il n'appelle pas. La couverture ne le voit pas non plus — une classe
+jamais instanciée n'apparaît dans aucun rapport comme une ligne manquante,
+elle apparaît comme une ligne de `class` exécutée à l'import.
+
+Seule une analyse du graphe d'usage le trouve. Le bon critère n'est pas
+« symbole jamais importé » — trop large, il signale chaque constante locale —
+mais **« nom qui n'apparaît jamais en position d'appel, `X(...)`, dans tout le
+dépôt »**. `Lead` n'apparaissait nulle part ; `Provenance` n'apparaissait que
+dans l'annotation `Lead.provenance: Provenance`. **Une annotation n'est pas un
+usage : elle ne prouve que l'intention.**
+
+Audit passé au 2026-08-16 sur les 55 classes et fonctions publiques de `src/` :
+6 candidats, **tous justifiés** — trois outils MCP appelés par le protocole via
+`@serveur.tool`, et trois énumérations ou dataclasses utilisées par attribut
+(`Qualification.ACHAT`, `GrillePonderation.defaut()`). **Aucun code mort
+restant.** Vérifié en relançant l'audit sur le commit précédent : il y signale
+exactement `Lead` et `Provenance`, et rien d'autre.
+
 ### Leçon générale : un tri en amont est un filtre
 
 Découvert en Phase 4, mais valable bien au-delà de ce projet.
@@ -507,6 +529,19 @@ l'ensemble des résultats possibles. Il ne réordonne pas : il supprime.
 
 Le symptôme est traître parce que la sortie reste plausible — elle est
 simplement amputée de ce qu'on ne verra jamais.
+
+**Corollaire trouvé en Phase 3 bis : le compte rendu doit dire la troncature.**
+`leads_classables` comptait les leads **après** la coupe à `limite`. Sur une
+mesure réelle — 06, six mois, > 300 k€ — il annonçait « 25 classables » sur
+115 candidats, ce qui se lit comme 90 refus de la grille. La réalité mesurée :
+**49 classables, 25 rendus, 65 candidats jamais enrichis** faute de budget
+d'appels, et **un seul** vrai refus à ce stade (société cédante cessée).
+
+Trois catégories que le décompte confondait, et qu'il sépare désormais :
+**écarté** (jugé, avec motif) / **tronqué** (classable, hors des N premiers) /
+**non enrichi** (jamais examiné). Seule la première est un refus. Le résumé
+étant recopié tel quel à l'utilisateur, c'est exactement là que le chiffre
+détaché de son référent se propage.
 
 `models.py` : `LiquidityEvent`, `Lead`, `ScoreBreakdown` (pydantic).
 `scoring.py` : fonction pure et déterministe. Critères :
@@ -614,6 +649,17 @@ sait pas nommer n'est pas du B2B établi.
 
 Gate : ✅ un test prouve qu'un lead sans provenance ne peut pas être exporté.
 Vérifié par mutation — cinq altérations de l'implémentation, cinq détectées.
+
+**Mesuré, pas déduit.** Sur une exécution réseau réelle du 2026-08-16 (06, six
+mois, > 300 k€) : `provenance incomplete` = **0 sur 458 annonces examinées**, et
+les 25 leads rendus portent les quatre champs. C'était le résultat attendu, mais
+« devrait valoir 0 » est la formule qui a produit tous les défauts de ce projet.
+Le raisonnement plausible ne remplace pas la mesure — voir la leçon sur les
+symboles jamais construits.
+
+`demo.sh` a un quatrième acte : les quatre champs d'un lead réel, puis le même
+lead privé de son URL, qui ne se sérialise pas. Les actes 2 et 3 barrent ce qui
+**entre**, le 4 barre ce qui **sort**.
 
 ### Phase 4 — Serveur MCP ✅ FAIT
 

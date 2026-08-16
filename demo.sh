@@ -1,13 +1,16 @@
 #!/bin/sh
 # Demonstration end-to-end, en une commande :  ./demo.sh
 #
-# Trois actes :
+# Quatre actes :
 #   1. le pipeline complet sur donnees reelles
 #   2. le hook PreToolUse barre l'AGENT
 #   3. le transport HTTP barre le CODE
+#   4. la provenance barre la SORTIE
 #
 # Les actes 2 et 3 sont indissociables : aucun des deux verrous ne suffit
-# seul, et le montrer vaut mieux que de laisser croire l'inverse.
+# seul, et le montrer vaut mieux que de laisser croire l'inverse. L'acte 4
+# est un verrou d'une autre nature — il ne barre pas une collecte, il barre
+# une sortie — et tient volontairement en quelques lignes.
 
 set -e
 cd "$(dirname "$0")"
@@ -75,4 +78,44 @@ trait
 echo "  Deux verrous, deux perimetres. Aucun des deux ne suffit seul :"
 echo "    - le hook ne voit pas un httpx.get() enfoui dans un fichier"
 echo "    - le transport ne voit pas un curl tape par l'agent"
+
+trait
+echo "  ACTE 4 — la provenance barre la SORTIE"
+echo "  Les actes 2 et 3 barrent ce qui ENTRE. Celui-ci barre ce qui SORT."
+trait
+
+$PYTHON - <<'PY'
+from datetime import date
+
+from pydantic import ValidationError
+
+from fundora_prospect import provenance
+from fundora_prospect.models import Evaluation, LiquidityEvent, StatutEntreprise, TypeCedant
+
+def evenement(url: str) -> LiquidityEvent:
+    return LiquidityEvent(
+        id="DEMO", date_parution=date.today(), date_acte=date.today(),
+        departement="06", url_publication=url, montant_eur=420_000.0, devise="EUR",
+        qualification="achat", retenu=True, cedant_denomination="CEDANT DEMO",
+        cedant_type=TypeCedant.PERSONNE_MORALE, cedant_siren="852872563",
+        statut_cedant=StatutEntreprise.ACTIVE,
+    )
+
+note = Evaluation(event_id="DEMO", classable=True, score=78.4)
+lead = provenance.assembler(evenement("https://www.bodacc.fr/x/DEMO"), note)
+
+print("\n  Les quatre champs que porte chaque lead (contrainte 3) :\n")
+for cle, valeur in provenance.serialiser(lead)["provenance"].items():
+    print(f"    {cle:<16} {str(valeur)[:88]}")
+
+print("\n  Le meme lead, prive de son URL de publication :\n")
+try:
+    provenance.assembler(evenement(""), note)
+except ValidationError as refus:
+    print(f"    ValidationError : {refus.errors()[0]['msg'][:96]}")
+
+print("\n  Un lead sans les quatre champs ne sort pas. Il n'est pas rendu")
+print("  sans provenance, il est compte dans les refus avec son motif.\n")
+PY
+
 trait

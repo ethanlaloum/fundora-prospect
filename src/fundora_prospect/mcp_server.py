@@ -125,12 +125,34 @@ def _date(brut: str | None, nom: str) -> date | None:
 
 
 def _resume(stats: dict[str, Any]) -> str:
+    """Le resume est lu par un modele, puis recopie tel quel a l'utilisateur.
+    Il doit donc separer ce qui a ete ECARTE — un jugement, avec son motif — de
+    ce qui a seulement ete TRONQUE ou jamais examine. Sans cette separation, la
+    sortie parait exhaustive alors qu'elle est amputee, et le lecteur attribue
+    a la grille des refus qu'elle n'a pas prononces.
+    """
     morceaux = [
         f"{stats['annonces_examinees']} annonces examinees",
         f"{stats['leads_classables']} classables",
     ]
     morceaux += [f"{n} {motif}" for motif, n in stats["ecartes"].items()]
-    return ", ".join(morceaux) + "."
+    resume = ", ".join(morceaux) + "."
+
+    reserves = []
+    if stats["leads_rendus"] < stats["leads_classables"]:
+        reserves.append(
+            f"{stats['leads_rendus']} rendus sur {stats['leads_classables']} "
+            "classables (limite atteinte)"
+        )
+    if stats["candidats_non_enrichis"]:
+        reserves.append(
+            f"{stats['candidats_non_enrichis']} candidats non enrichis donc non "
+            "classes, faute de budget d'appels : relancer avec une limite plus "
+            "haute pour les voir"
+        )
+    if reserves:
+        resume += " " + " ; ".join(reserves) + "."
+    return resume
 
 
 # --- Outils --------------------------------------------------------------------
@@ -257,13 +279,21 @@ def search_liquidity_events(
         leads.append(provenance.serialiser(lead))
 
     leads.sort(key=lambda lead: lead["score"], reverse=True)
+
+    # `classables` se compte AVANT la coupe. Compter apres ferait passer une
+    # troncature pour un jugement de la grille : sur 115 candidats, « 25
+    # classables » se lit comme 90 refus, alors que la grille n'en a jamais vu
+    # que 50 et n'en a refuse aucun.
+    classables = len(leads)
     leads = leads[:limite]
 
     statistiques = {
         "annonces_examinees": len(annonces),
         "candidats_avant_enrichissement": len(candidats),
         "enrichis": len(a_enrichir),
-        "leads_classables": len(leads),
+        "candidats_non_enrichis": len(candidats) - len(a_enrichir),
+        "leads_classables": classables,
+        "leads_rendus": len(leads),
         "ecartes": ecartes,
     }
     return {
