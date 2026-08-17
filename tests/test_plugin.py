@@ -175,6 +175,34 @@ def test_l_acte_synthetique_de_la_demo_se_declare_a_l_ecran() -> None:
     assert "reelles" in banniere, "et dire quels actes portent du reel"
 
 
+def test_la_demo_dit_qu_elle_n_affiche_pas_tous_les_leads() -> None:
+    """La demo enrichit a `limite` mais n'imprime qu'une poignee de leads :
+    25 leads font 75 lignes, soit plusieurs ecrans.
+
+    C'est une troncature d'AFFICHAGE, et elle tombe sous la meme regle que
+    toutes les autres coupes du projet — « un tri en amont est un filtre », et
+    son corollaire : le compte rendu doit dire la troncature. Le resume juste
+    au-dessus annonce « 25 rendus » ; si l'ecran en montre 5 sans le dire, les
+    deux nombres se contredisent sous les yeux du spectateur.
+
+    Le test cherche un `print` qui porte LES DEUX nombres. Se contenter de
+    verifier que les identifiants apparaissent quelque part ne mordait pas :
+    ils survivent dans la decoupe `leads[:AFFICHES]` et dans l'affectation de
+    `rendus`, donc supprimer l'affichage laissait le test vert. Ce qui compte
+    n'est pas que le script connaisse l'ecart, c'est qu'il le dise.
+    """
+    texte = (RACINE / "demo.sh").read_text(encoding="utf-8")
+    acte1 = texte.split("ACTE 1", 1)[1].split("ACTE 2", 1)[0]
+    impressions = [
+        ligne
+        for ligne in acte1.splitlines()
+        if "print(" in ligne or ligne.lstrip().startswith('f"')
+    ]
+    assert any("AFFICHES" in ligne and "rendus" in ligne for ligne in impressions), (
+        "aucun print ne compare les leads affiches au nombre rendu"
+    )
+
+
 def test_l_acte_reel_de_la_demo_n_avale_pas_ses_erreurs() -> None:
     """`2>/dev/null` sur l'acte 1 masquait le bruit des logs — et avec lui un
     incident reseau. On verrait alors des chiffres plus faibles sans savoir

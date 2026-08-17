@@ -611,6 +611,19 @@ d'affichage — le chiffre serait devenu exact. Refusée : elle fait payer ~100
 appels API à qui n'en demande que 5. Nommer juste coûte zéro appel, et
 l'information manquante (`candidats_non_enrichis`) était déjà affichée à côté.
 
+**`demo.sh` appelle désormais avec `limite=25`**, le défaut de l'outil et la
+valeur citée par le README — même requête, mêmes chiffres aux deux endroits.
+Coût mesuré le 2026-08-17, cache froid : **6,8 s à `limite=5` contre 10,6 s à
+`limite=25`**, pour 40 appels API de plus. Le compteur annonce alors
+« 49 classables parmi les 50 enrichis » au lieu de saturer à 10.
+
+Ce qui a fait apparaître une **troisième** troncature, d'affichage cette fois :
+25 leads font 75 lignes, soit plusieurs écrans. La démo n'en imprime que 5 —
+et le dit (`[5 premiers affiches sur 25 rendus — troncature d'ecran, pas un
+refus]`). Sans cette ligne, l'écran contredirait le résumé qui vient d'annoncer
+« 25 rendus », sous les yeux du spectateur. Même règle qu'ailleurs : **une coupe
+qui ne se déclare pas se lit comme un résultat.**
+
 #### Le jumeau : `annonces_examinees`
 
 Cherché délibérément après la correction — *si un compteur ment, son voisin

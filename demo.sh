@@ -40,13 +40,34 @@ import logging
 logging.disable(logging.INFO)
 from fundora_prospect.mcp_server import search_liquidity_events
 
-r = search_liquidity_events(departement="06", mois=6, montant_min=300_000, limite=5)
+# `limite` a DEUX effets : elle borne l'affichage, mais elle borne surtout le
+# budget d'enrichissement (2 x limite appels API), donc le nombre de dossiers
+# que la grille a le droit de juger. A limite=5 le compteur de classables
+# saturait a 10 sur une population qui en contient au moins 96 — la demo
+# affichait un plafond de budget en croyant montrer un resultat.
+#
+# 25 est le defaut de l'outil, et c'est la valeur citee par le README : meme
+# requete, memes chiffres aux deux endroits. Coût mesure le 2026-08-17, cache
+# froid : 6,8 s a limite=5 contre 10,6 s a limite=25.
+LIMITE = 25
+
+# Mais 25 leads font 75 lignes, soit plusieurs ecrans. On tronque l'AFFICHAGE
+# — et on le dit, sinon l'ecran contredit le resume qui vient d'annoncer
+# « 25 rendus ». Meme regle que partout ailleurs dans ce projet : une coupe qui
+# ne se declare pas se lit comme un resultat.
+AFFICHES = 5
+
+r = search_liquidity_events(departement="06", mois=6, montant_min=300_000, limite=LIMITE)
 print(f"\n  {r['resume']}\n")
-for i, lead in enumerate(r["leads"], 1):
+rendus = r["statistiques"]["leads_rendus"]
+for i, lead in enumerate(r["leads"][:AFFICHES], 1):
     print(f"  {i}. {lead['score']:>5.1f}/100  {lead['cedant'][:40]}")
     print(f"       {lead['montant_eur']:>12,.0f} EUR   SIREN {lead['siren']}   "
           f"acte {lead['date_acte'] or 'non datable'}   {lead['statut_cedant']}")
     print(f"       {lead['url_publication']}")
+if rendus > AFFICHES:
+    print(f"\n  [{AFFICHES} premiers affiches sur {rendus} rendus — troncature"
+          f" d'ecran, pas un refus]")
 if r["leads"]:
     print("\n  Detail du premier — chaque point est justifie :")
     for c in r["leads"][0]["breakdown"]:
