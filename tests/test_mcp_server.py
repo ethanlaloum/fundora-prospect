@@ -211,7 +211,7 @@ def test_la_sortie_porte_les_motifs_de_refus(sans_reseau) -> None:
 
     stats = charge["statistiques"]
     assert stats["annonces_publiees"] > 0
-    assert stats["leads_classables"] >= 0
+    assert stats["classables_parmi_les_enrichis"] >= 0
     assert stats["ecartes"], "les refus doivent etre ventiles par motif"
     assert sum(stats["ecartes"].values()) > 0
     assert "resume" in charge and str(stats["annonces_publiees"]) in charge["resume"]
@@ -402,9 +402,74 @@ def test_la_troncature_ne_se_compte_pas_comme_un_refus(monkeypatch: pytest.Monke
 
     # limite=1 => 2 enrichis, tous deux classables, 1 seul rendu.
     assert stats["leads_rendus"] == 1
-    assert stats["leads_classables"] == 2
+    assert stats["classables_parmi_les_enrichis"] == 2
     assert stats["ecartes"].get("non classable", 0) == 0, "aucun refus de la grille ici"
-    assert "1 rendus sur 2 classables" in charge["resume"]
+    assert "1 rendus sur 2 classables parmi les 2 enrichis" in charge["resume"]
+
+
+def test_le_compteur_de_classables_dit_qu_il_ne_voit_que_les_enrichis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Troisieme etage de la meme erreur, trouve en relisant la demo.
+
+    La Phase 3 bis avait remonte le compteur au-dessus de la coupe finale
+    `leads[:limite]`. Mais la coupe AMONT `candidats[:limite * 2]` etait
+    restee : le compteur est donc plafonne a `2 * limite`, et il sature en
+    silence des que la population depasse ce budget.
+
+    Mesure du 2026-08-17 sur le 06, six mois, > 300 k EUR — meme population,
+    trois budgets :
+
+    | limite | plafond 2x | classables annonces |
+    |--------|-----------|---------------------|
+    | 5      | 10        | **10** — sature     |
+    | 25     | 50        | 49                  |
+    | 50     | 100       | 96                  |
+
+    `demo.sh` appelle avec `limite=5` et affichait « 10 classables » sur une
+    population qui en contient au moins 96. Le mot « classable » promet un
+    jugement de la grille ; il rapportait combien de dossiers la grille avait
+    eu le DROIT de regarder.
+
+    Le nom doit donc porter sa condition d'obtention — c'est la regle 1 des
+    lecons du projet : un chiffre ne s'ecrit jamais sans son referent.
+    """
+    corpus = [fabriquer_annonce(f"CEDANT-{i}", 300_000 + i * 1_000, 10) for i in range(40)]
+    monkeypatch.setattr(mcp_server, "rechercher", lambda **_: recherche_de(corpus))
+    monkeypatch.setattr(
+        mcp_server,
+        "enrichir",
+        lambda siren, **_: Enrichissement(
+            siren=str(siren or ""), statut=StatutEntreprise.ACTIVE, motif="fixture"
+        ),
+    )
+
+    charge = appeler(
+        "search_liquidity_events", {"departement": "06", "limite": 5}
+    ).structured_content
+    stats = charge["statistiques"]
+
+    # 40 candidats, budget 2 x 5 = 10 : le compteur SATURE.
+    assert stats["candidats_avant_enrichissement"] == 40
+    assert stats["enrichis"] == 10
+    assert stats["classables_parmi_les_enrichis"] == 10
+
+    # L'ancien nom ne doit plus exister : il promettait la population entiere.
+    assert "leads_classables" not in stats
+
+    # Et le resume doit dire sur quoi le chiffre porte, dans la meme phrase.
+    assert "5 rendus sur 10 classables parmi les 10 enrichis" in charge["resume"]
+    assert "30 candidats non enrichis" in charge["resume"]
+
+    # Regle 1 des lecons du projet, verifiee sur CHAQUE occurrence et pas
+    # seulement sur la ligne de reserve : un chiffre ne s'ecrit jamais sans son
+    # referent. Sans cette boucle, retirer « parmi les N enrichis » de la phrase
+    # principale passait le test — la mutation a survecu la premiere fois.
+    resume = charge["resume"]
+    for suite in resume.split("classables")[1:]:
+        assert suite.startswith(" parmi les "), (
+            f"« classables » sans son referent dans : {resume!r}"
+        )
 
 
 def test_les_candidats_jamais_enrichis_sont_annonces(monkeypatch: pytest.MonkeyPatch) -> None:

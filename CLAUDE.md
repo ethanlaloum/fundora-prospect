@@ -569,6 +569,48 @@ Trois catégories que le décompte confondait, et qu'il sépare désormais :
 étant recopié tel quel à l'utilisateur, c'est exactement là que le chiffre
 détaché de son référent se propage.
 
+#### Le troisième étage : la correction n'était montée que d'un cran
+
+Trouvé le 2026-08-17 en relisant la sortie de `demo.sh`, après une question
+posée en direct sur la démo.
+
+La Phase 3 bis avait remonté le compteur au-dessus de la coupe **finale**
+(`leads[:limite]`). Mais la coupe **amont** — `candidats[: limite * 2]`, le
+budget d'enrichissement — était restée en dessous. Le compteur restait donc
+plafonné à **2 × `limite`**, et il **saturait en silence** dès que la
+population dépassait ce budget.
+
+Mesuré le 2026-08-17 sur la même population — 06, six mois, > 300 k€ :
+
+| `limite` | Plafond 2× | Classables annoncés |
+|---|---|---|
+| 5 *(celui de `demo.sh`)* | 10 | **10 — saturé** |
+| 25 | 50 | 49 |
+| 50 | 100 | 96 |
+
+`demo.sh` annonçait donc « **10 classables** » sur une population qui en
+contient au moins 96 — et c'est le seul jeu de paramètres qu'un recruteur voit.
+Le mot « classable » promet un jugement de la grille ; il rapportait combien de
+dossiers la grille avait eu **le droit de regarder**.
+
+Le champ s'appelle désormais **`classables_parmi_les_enrichis`**, et le résumé
+écrit « 10 classables **parmi les 10 enrichis** ». Le nom porte sa condition
+d'obtention, ce qui est la règle 1 des leçons de ce projet appliquée à un
+identifiant et non plus à une phrase de documentation.
+
+**La leçon qui s'ajoute : corriger un compteur, c'est le remonter au-dessus de
+TOUTES les coupes, pas de la dernière rencontrée.** Un pipeline qui tronque à
+plusieurs étages redonne le même défaut à chaque étage laissé en dessous. La
+correction de Phase 3 bis était juste et incomplète — et son commentaire, en
+disant « se compte AVANT la coupe » au singulier, a rendu l'étage restant
+invisible pendant deux phases.
+
+**Corollaire de méthode : renommer plutôt qu'augmenter le budget.** L'autre
+option était d'enrichir un nombre fixe de candidats quelle que soit la limite
+d'affichage — le chiffre serait devenu exact. Refusée : elle fait payer ~100
+appels API à qui n'en demande que 5. Nommer juste coûte zéro appel, et
+l'information manquante (`candidats_non_enrichis`) était déjà affichée à côté.
+
 #### Le jumeau : `annonces_examinees`
 
 Cherché délibérément après la correction — *si un compteur ment, son voisin

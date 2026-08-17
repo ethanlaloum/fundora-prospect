@@ -153,6 +153,50 @@ def test_la_demo_est_une_seule_commande_executable() -> None:
     assert "linkedin" in texte.lower(), "le domaine de demo doit etre evocateur"
 
 
+def test_l_acte_synthetique_de_la_demo_se_declare_a_l_ecran() -> None:
+    """L'acte 4 fabrique son `LiquidityEvent` a la main — il le faut, on ne peut
+    pas compter sur le reseau pour livrer un lead casse. Mais l'ecran annonce
+    « les quatre champs que porte CHAQUE lead » : sans mention, le spectateur
+    croit voir un lead reel.
+
+    La question a ete posee en direct — « peut-etre que la demo n'utilise pas
+    l'API, tout est ecrit en dur ». Elle visait l'acte 1, qui est bien un appel
+    reel ; mais elle est exacte pour l'acte 4. Un recruteur technique la posera
+    aussi, et il vaut mieux que la reponse soit deja a l'ecran.
+    """
+    texte = (RACINE / "demo.sh").read_text(encoding="utf-8")
+    acte4 = texte.split("ACTE 4", 1)[1]
+    # La BANNIERE seule — les `echo` avant le premier bloc Python. Chercher dans
+    # tout l'acte laissait la mutation passer : le mot figure aussi dans un
+    # `print` du heredoc, et en retirer un exemplaire laissait l'autre verdir le
+    # test. Ce qui compte est ce que le spectateur lit AVANT le resultat.
+    banniere = acte4.split("$PYTHON", 1)[0].lower()
+    assert "synthetique" in banniere, "l'acte 4 doit s'annoncer fabrique avant d'afficher"
+    assert "reelles" in banniere, "et dire quels actes portent du reel"
+
+
+def test_l_acte_reel_de_la_demo_n_avale_pas_ses_erreurs() -> None:
+    """`2>/dev/null` sur l'acte 1 masquait le bruit des logs — et avec lui un
+    incident reseau. On verrait alors des chiffres plus faibles sans savoir
+    pourquoi, dans le seul acte qui pretend mesurer le reel.
+
+    Le filtre doit etre etroit : taire les logs, pas les erreurs.
+
+    On ne regarde que les lignes de COMMANDE : la redirection est un fait
+    d'execution, pas une chaine de caracteres. Chercher partout ferait echouer
+    le test sur le commentaire qui explique le retrait — un test ne doit pas
+    interdire de documenter sa propre raison d'etre.
+    """
+    texte = (RACINE / "demo.sh").read_text(encoding="utf-8")
+    acte1 = texte.split("ACTE 1", 1)[1].split("ACTE 2", 1)[0]
+    commandes = [
+        ligne for ligne in acte1.splitlines() if not ligne.lstrip().startswith("#")
+    ]
+    assert not any("2>/dev/null" in ligne for ligne in commandes), (
+        "l'acte 1 ne doit pas jeter sa sortie d'erreur"
+    )
+
+
 # --- Marketplace ---------------------------------------------------------------
 
 

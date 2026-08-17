@@ -373,21 +373,30 @@ suffit ; les deux autres outils restent là pour inspecter un cas précis.
 
 **La réponse porte les motifs de refus, pas seulement les leads.** Sortie réelle
 sur le 06, six mois, plus de 300 k€, limite par défaut (25) — **mesurée le
-2026-08-16** :
+2026-08-17** :
 
 ```
-662 annonces publiees, 600 rapatriees seulement (plafond de rapatriement
-atteint), 142 sans cedant ou illisibles, 458 exploitables, 49 classables,
-333 sous le montant minimum, 6 apport, 2 absent, 2 acte trop ancien,
-1 societe cedante cessee. 25 rendus sur 49 classables (limite atteinte) ;
-65 candidats non enrichis donc non classes, faute de budget d'appels :
-relancer avec une limite plus haute pour les voir.
+668 annonces publiees, 600 rapatriees seulement (plafond de rapatriement
+atteint), 140 sans cedant ou illisibles, 460 exploitables, 49 classables
+parmi les 50 enrichis, 334 sous le montant minimum, 6 apport, 2 absent,
+2 acte trop ancien, 1 societe cedante cessee. 25 rendus sur 49 classables
+parmi les 50 enrichis (limite atteinte) ; 66 candidats non enrichis donc
+non classes, faute de budget d'appels : relancer avec une limite plus
+haute pour les voir.
 ```
 
 C'est verbeux, et c'est le prix de l'exactitude. Ce résumé tenait auparavant en
 une ligne — « 458 annonces examinées, 5 classables » — dont **les deux nombres
 étaient faux au même titre** : chacun était compté après une coupe, sous un nom
 qui promettait la population entière.
+
+**« parmi les 50 enrichis » n'est pas une lourdeur, c'est le référent du
+chiffre.** L'enrichissement coûte un appel API par lead, donc seuls `2 × limite`
+candidats sont examinés : le nombre de classables est **borné par ce budget**,
+et il sature dès que la population le dépasse. Mesuré le 2026-08-17 sur la même
+population — `limite=5` → 10 classables (plafond touché), `limite=25` → 49,
+`limite=50` → 96. Sans son référent, « 10 classables » se lirait comme une
+propriété du 06 alors que c'est une propriété de l'appel.
 
 Cinq statuts, qu'un seul mot recouvrait :
 

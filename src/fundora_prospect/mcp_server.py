@@ -143,16 +143,20 @@ def _resume(stats: dict[str, Any]) -> str:
         morceaux.append(f"{stats['sans_cedant_ou_illisibles']} sans cedant ou illisibles")
     morceaux += [
         f"{stats['annonces_exploitables']} exploitables",
-        f"{stats['leads_classables']} classables",
+        # Le chiffre porte sa condition d'obtention DANS la meme phrase : il ne
+        # decrit que les dossiers enrichis, pas la population exploitable.
+        f"{stats['classables_parmi_les_enrichis']} classables "
+        f"parmi les {stats['enrichis']} enrichis",
     ]
     morceaux += [f"{n} {motif}" for motif, n in stats["ecartes"].items()]
     resume = ", ".join(morceaux) + "."
 
     reserves = []
-    if stats["leads_rendus"] < stats["leads_classables"]:
+    if stats["leads_rendus"] < stats["classables_parmi_les_enrichis"]:
         reserves.append(
-            f"{stats['leads_rendus']} rendus sur {stats['leads_classables']} "
-            "classables (limite atteinte)"
+            f"{stats['leads_rendus']} rendus sur "
+            f"{stats['classables_parmi_les_enrichis']} classables parmi les "
+            f"{stats['enrichis']} enrichis (limite atteinte)"
         )
     if stats["candidats_non_enrichis"]:
         reserves.append(
@@ -291,11 +295,20 @@ def search_liquidity_events(
 
     leads.sort(key=lambda lead: lead["score"], reverse=True)
 
-    # `classables` se compte AVANT la coupe. Compter apres ferait passer une
-    # troncature pour un jugement de la grille : sur 115 candidats, « 25
-    # classables » se lit comme 90 refus, alors que la grille n'en a jamais vu
-    # que 50 et n'en a refuse aucun.
-    classables = len(leads)
+    # Ce compteur se prend AVANT la coupe finale — sinon une troncature se lit
+    # comme un jugement de la grille : sur 115 candidats, « 25 classables » se
+    # lit comme 90 refus, alors que la grille n'en a jamais vu que 50 et n'en a
+    # refuse aucun.
+    #
+    # Mais il reste borne par la coupe AMONT `candidats[: limite * 2]`, donc
+    # plafonne a `2 * limite`. Il sature en silence des que la population
+    # depasse ce budget — mesure du 2026-08-17 sur le 06, six mois, > 300 k EUR,
+    # meme population : limite=5 -> 10 classables (plafond touche), limite=25 ->
+    # 49, limite=50 -> 96. C'est pourquoi il s'appelle desormais
+    # `classables_parmi_les_enrichis` : le nom porte sa condition d'obtention.
+    # Sans elle, « classables » promet un jugement sur toute la population alors
+    # qu'il compte ce que la grille a eu le DROIT de regarder.
+    classables_parmi_les_enrichis = len(leads)
     leads = leads[:limite]
 
     statistiques = {
@@ -310,7 +323,7 @@ def search_liquidity_events(
         "candidats_avant_enrichissement": len(candidats),
         "enrichis": len(a_enrichir),
         "candidats_non_enrichis": len(candidats) - len(a_enrichir),
-        "leads_classables": classables,
+        "classables_parmi_les_enrichis": classables_parmi_les_enrichis,
         "leads_rendus": len(leads),
         "ecartes": ecartes,
     }

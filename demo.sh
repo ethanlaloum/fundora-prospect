@@ -31,7 +31,11 @@ echo "  ACTE 1 — le pipeline, sur donnees reelles"
 echo "  « trouve-moi les cessions de plus de 300 k EUR dans le 06 sur 6 mois »"
 trait
 
-$PYTHON - <<'PY' 2>/dev/null
+# Les logs INFO sont deja coupes cote Python. On ne redirige donc PAS stderr :
+# un `2>/dev/null` ferait disparaitre un incident reseau avec le bruit, et
+# l'acte 1 afficherait des chiffres plus faibles sans dire pourquoi. C'est le
+# seul acte qui pretend mesurer le reel — il doit se plaindre quand il echoue.
+$PYTHON - <<'PY'
 import logging
 logging.disable(logging.INFO)
 from fundora_prospect.mcp_server import search_liquidity_events
@@ -82,6 +86,10 @@ echo "    - le transport ne voit pas un curl tape par l'agent"
 trait
 echo "  ACTE 4 — la provenance barre la SORTIE"
 echo "  Les actes 2 et 3 barrent ce qui ENTRE. Celui-ci barre ce qui SORT."
+echo
+echo "  Lead SYNTHETIQUE, fabrique ici — les actes 1 a 3 tournent sur des"
+echo "  donnees reelles. Montrer qu'un lead casse est REFUSE demande un lead"
+echo "  casse : on ne peut pas compter sur le BODACC pour en publier un."
 trait
 
 $PYTHON - <<'PY'
@@ -104,7 +112,8 @@ def evenement(url: str) -> LiquidityEvent:
 note = Evaluation(event_id="DEMO", classable=True, score=78.4)
 lead = provenance.assembler(evenement("https://www.bodacc.fr/x/DEMO"), note)
 
-print("\n  Les quatre champs que porte chaque lead (contrainte 3) :\n")
+print("\n  Les quatre champs que porte chaque lead (contrainte 3),")
+print("  ici sur un lead synthetique :\n")
 for cle, valeur in provenance.serialiser(lead)["provenance"].items():
     print(f"    {cle:<16} {str(valeur)[:88]}")
 
