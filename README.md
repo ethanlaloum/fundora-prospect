@@ -13,11 +13,17 @@ Sur cette base :
 > Provence-Alpes-Côte d'Azur, avec un cédant personne morale identifié, son
 > SIREN et l'URL de sa publication au BODACC.**
 
-Chiffre **mesuré**, pas estimé. Démonstration complète en une commande :
+Chiffre **mesuré**, pas estimé. Depuis un clone frais :
 
 ```bash
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # Python 3.11+
 ./demo.sh
 ```
+
+La démo tourne **sur le réseau réel**, sans jeu de données figé : environ 13 s
+à froid, et les chiffres du jour ne seront pas ceux cités plus bas. Sans les
+dépendances, `demo.sh` s'arrête en disant quoi lancer plutôt que d'échouer en
+cours de route.
 
 ---
 
