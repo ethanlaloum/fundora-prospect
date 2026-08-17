@@ -16,6 +16,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from fundora_prospect import mcp_server
+
 RACINE = Path(__file__).resolve().parents[1]
 
 
@@ -128,6 +130,61 @@ def test_la_competence_de_recherche_donne_l_exemple_de_la_demo() -> None:
     texte = (RACINE / "skills" / "scan-liquidity-events" / "SKILL.md").read_text(encoding="utf-8")
     assert '"06"' in texte, "le format du departement doit etre explicite"
     assert "search_liquidity_events" in texte
+
+
+# Statistiques de la mesure du 2026-08-17 — 06, six mois, > 300 k EUR,
+# `limite=25`. Elles servent a REGENERER l'exemple de SKILL.md depuis le code.
+_STATS_DE_REFERENCE = {
+    "annonces_publiees": 668,
+    "annonces_rapatriees": 600,
+    "annonces_exploitables": 460,
+    "sans_cedant_ou_illisibles": 140,
+    "plafond_atteint": True,
+    "candidats_avant_enrichissement": 116,
+    "enrichis": 50,
+    "candidats_non_enrichis": 66,
+    "classables_parmi_les_enrichis": 49,
+    "leads_rendus": 25,
+    "ecartes": {
+        "sous le montant minimum": 334,
+        "apport": 6,
+        "absent": 2,
+        "acte trop ancien": 2,
+        "societe cedante cessee": 1,
+    },
+}
+
+
+def test_l_exemple_de_la_competence_est_le_vrai_format_de_sortie() -> None:
+    """SKILL.md est du PROMPT, pas de la documentation : c'est lui qui dit au
+    modele a quoi ressemble le resume et comment le presenter. Un exemple perime
+    y est pire qu'ailleurs — il apprend au modele un format qui n'existe plus.
+
+    Il en citait un date de deux renommages : « 458 annonces examinees, 5
+    classables ». `annonces_examinees` avait disparu en Phase 3 bis, et
+    `classables` a pris son referent le 2026-08-17. Aucun test ne le gardait,
+    donc la derive a survecu aux deux corrections — quatrieme occurrence du
+    mecanisme « un chiffre survit au changement de sa source ».
+
+    Le test REGENERE l'exemple depuis `_resume` et exige l'egalite. Recopier a
+    la main rouvrirait la meme porte : c'est la source qui doit produire
+    l'exemple, pas la bonne volonte du relecteur.
+    """
+    attendu = mcp_server._resume(dict(_STATS_DE_REFERENCE))
+    texte = (RACINE / "skills" / "scan-liquidity-events" / "SKILL.md").read_text(encoding="utf-8")
+
+    # L'exemple est une citation markdown : on la reconstitue en une ligne.
+    citation = " ".join(
+        ligne.lstrip("> ").strip()
+        for ligne in texte.splitlines()
+        if ligne.startswith(">")
+    ).strip()
+
+    assert citation == attendu, (
+        "l'exemple de SKILL.md a derive du format reel.\n"
+        f"  dans SKILL.md : {citation}\n"
+        f"  produit par _resume : {attendu}"
+    )
 
 
 def test_les_competences_rappellent_le_cadrage() -> None:

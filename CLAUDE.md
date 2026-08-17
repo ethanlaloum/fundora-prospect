@@ -784,10 +784,18 @@ strictement granulaires obligeraient le modele a orchestrer des dizaines
 d'appels, ce qui est lent et indemontrable en direct. `enrich_company` et
 `score_lead` restent exposes pour inspecter un cas isole.
 
-**La sortie porte les motifs de refus**, ventiles : « 458 annonces examinees,
-5 classables, 333 sous le montant minimum, 6 apport, 2 absent, 2 acte trop
-ancien ». L'auditabilite doit etre visible dans le transport, pas seulement
+**La sortie porte les motifs de refus**, ventiles : « 668 annonces publiees,
+600 rapatriees seulement (plafond de rapatriement atteint), 140 sans cedant ou
+illisibles, 460 exploitables, 49 classables parmi les 50 enrichis, 334 sous le
+montant minimum, 6 apport, 2 absent, 2 acte trop ancien, 1 societe cedante
+cessee ». L'auditabilite doit etre visible dans le transport, pas seulement
 dans les tests.
+
+*Cette phrase citait encore le format d'avant la Phase 3 bis — « 458 annonces
+examinees, 5 classables » — jusqu'au 2026-08-17. L'exemple de `SKILL.md` aussi,
+et lui est du prompt. Voir la leçon sur le chiffre qui survit à sa source ;
+l'exemple de `SKILL.md` est désormais **régénéré depuis `_resume` par un
+test**, parce que la recopie manuelle avait déjà échoué deux fois.*
 
 **Le pre-classement avant enrichissement se fait sur le SCORE PROVISOIRE, pas
 sur le montant.** L'enrichissement coute un appel API par lead, donc seul le

@@ -32,8 +32,24 @@ Sans precision : `mois=12`, `montant_min=0`, `limite=25`.
 **Toujours donner le resume avant la liste.** Il contient le decompte des
 annonces ecartees avec leur motif — c'est ce qui rend le resultat auditable :
 
-> 458 annonces examinees, 5 classables, 333 sous le montant minimum,
-> 6 apport, 2 absent, 2 acte trop ancien.
+> 668 annonces publiees, 600 rapatriees seulement (plafond de rapatriement
+> atteint), 140 sans cedant ou illisibles, 460 exploitables, 49 classables
+> parmi les 50 enrichis, 334 sous le montant minimum, 6 apport, 2 absent,
+> 2 acte trop ancien, 1 societe cedante cessee. 25 rendus sur 49 classables
+> parmi les 50 enrichis (limite atteinte) ; 66 candidats non enrichis donc
+> non classes, faute de budget d'appels : relancer avec une limite plus
+> haute pour les voir.
+
+**Ne pas raccourcir ce resume en le recopiant.** Chaque nombre porte sa
+condition d'obtention, et trois populations y sont distinctes :
+
+- **ecarte** — juge, avec un motif. C'est le seul vrai refus.
+- **tronque** — classable, mais hors des N premiers.
+- **non enrichi** — jamais examine, faute de budget d'appels.
+
+« 49 classables » sans « parmi les 50 enrichis » se lit comme une propriete du
+departement, alors que c'est une propriete de l'appel : le nombre de dossiers
+examines vaut `2 x limite`. Le dire entier, ou ne pas le dire.
 
 Puis les leads, du meilleur au moins bon. Pour chacun : le score, la
 denomination du cedant, son SIREN, le montant, la date de l'acte, et l'URL de
