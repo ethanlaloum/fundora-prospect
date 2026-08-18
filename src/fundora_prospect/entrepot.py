@@ -41,10 +41,27 @@ deterministe, `aujourdhui` en parametre.
 
 ## On ne cree que ce qu'on utilise
 
-Le schema porte `evenement`, `cedant` et `collecte`. `cedant_journal` et
-`evenement_revision` arrivent avec les paliers qui les lisent. Une table creee
-d'avance est de la structure morte, et `tools/symboles_morts.py` ne voit ni les
-tables ni les colonnes — il audite les symboles. D'ou `VERSION_SCHEMA`.
+Le schema porte `evenement`, `cedant`, `collecte`, `cedant_journal` et
+`evenement_revision` — chacune arrivee avec le palier qui la LIT, jamais avant.
+Une table creee d'avance est de la structure morte, et `tools/symboles_morts.py`
+ne voit ni les tables ni les colonnes — il audite les symboles. D'ou
+`VERSION_SCHEMA`, et une migration par palier.
+
+## Les deux journaux
+
+Ils repondent a deux questions que l'etat courant ne peut pas trancher, parce
+qu'un etat dit ce qui EST et jamais ce qui a CHANGE :
+
+- **`cedant_journal` : « pourquoi ce lead a-t-il disparu du classement ? »**
+  Une ligne par changement de statut, jamais par sondage. `active -> cessee`
+  date la sortie du prospect ; c'est un signal metier, pas une trace d'audit.
+- **`evenement_revision` : « ce fait a change — rectificatif ou regression ? »**
+  Un rectificatif du BODACC et un parser casse produisent le meme symptome.
+  Ecraser rend les deux indistinguables ; la version remplacee tranche.
+
+Les deux ne s'ecrivent que sur un CHANGEMENT REEL, detecte par `empreinte`.
+Ecrire a chaque passage les rendrait illisibles, donc inexploitables — un
+journal qui consigne tout ne consigne rien.
 
 **`collecte_ecart` n'existe pas, et c'est deliberé.** Les annonces ecartees
 sont stockees : leur decompte par motif se RECALCULE depuis `evenement` par la
@@ -56,9 +73,12 @@ nombres qu'aucune relecture ne peut retrouver.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
 import os
 import sqlite3
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -70,16 +90,24 @@ from fundora_prospect.models import (
     TypeCedant,
 )
 
+journal = logging.getLogger(__name__)
+
 VARIABLE_BASE = "FUNDORA_DB"
 
-# 1 : evenement + cedant. 2 : collecte.
+# 1 : evenement + cedant. 2 : collecte. 3 : cedant_journal, evenement_revision,
+# et la colonne `empreinte`.
 #
-# Les ajouts sont purement additifs et le schema est ecrit en `IF NOT EXISTS` :
-# ouvrir une base v1 cree la table manquante et rien d'autre. Le numero sert a
-# constater ou on en est, pas a piloter une sequence de scripts — le jour ou une
-# migration devra transformer des donnees existantes, elle ne pourra plus etre
-# implicite, et ce numero sera ce qui permet de la declencher.
-VERSION_SCHEMA = 2
+# Les versions 1 et 2 n'ajoutaient que des tables : le schema etant ecrit en
+# `IF NOT EXISTS`, ouvrir une base ancienne suffisait. **La version 3 est la
+# premiere qui ne peut plus etre implicite** — ajouter une colonne demande un
+# `ALTER TABLE`, et remplir `empreinte` sur les lignes existantes demande de la
+# CALCULER. Sans ce remplissage, la premiere recollecte verrait une empreinte
+# vide, conclurait a un changement, et ecrirait une revision fantome sur chaque
+# ligne de la base.
+#
+# C'est donc ici que ce numero cesse d'etre decoratif : il declenche la
+# migration, une fois.
+VERSION_SCHEMA = 3
 
 # Un statut se perime ; une annonce, non. On resonde donc les societes ACTIVES
 # passe ce delai.
@@ -141,7 +169,12 @@ CREATE TABLE IF NOT EXISTS evenement (
                               '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
 
     premiere_collecte     TEXT NOT NULL,
-    derniere_verification TEXT NOT NULL
+    derniere_verification TEXT NOT NULL,
+
+    -- Empreinte des colonnes de FAIT (pas des dates de suivi). Elle repond a
+    -- une seule question a la recollecte : « ce que le BODACC dit aujourd'hui
+    -- est-il ce qu'il disait la derniere fois ? »
+    empreinte             TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_evenement_recherche
@@ -181,7 +214,72 @@ CREATE TABLE IF NOT EXISTS collecte (
 
 CREATE INDEX IF NOT EXISTS idx_collecte_departement
     ON collecte (departement, lancee_a DESC);
+
+-- Les CHANGEMENTS de statut, jamais les sondages.
+--
+-- Une ligne par transition observee, et rien quand un sondage confirme ce
+-- qu'on savait deja : sinon la table grossirait a chaque balayage en ne disant
+-- rien. La premiere observation n'y figure pas non plus — ce n'est pas une
+-- transition, et `cedant.enrichi_a` la date deja.
+--
+-- Valeur metier, pas seulement d'audit : `active -> cessee` est la date a
+-- laquelle le produit de cession est descendu aux associes, donc la date de
+-- sortie du prospect.
+CREATE TABLE IF NOT EXISTS cedant_journal (
+    id           INTEGER PRIMARY KEY,
+    siren        TEXT NOT NULL REFERENCES cedant(siren),
+    observe_a    TEXT NOT NULL,
+    statut_avant TEXT NOT NULL,
+    statut_apres TEXT NOT NULL,
+    motif        TEXT NOT NULL,
+    CHECK (statut_avant <> statut_apres)
+);
+
+CREATE INDEX IF NOT EXISTS idx_journal_siren ON cedant_journal (siren, observe_a DESC);
+CREATE INDEX IF NOT EXISTS idx_journal_date ON cedant_journal (observe_a DESC);
+
+-- La version REMPLACEE d'un evenement dont le fait a change.
+--
+-- Un rectificatif du BODACC et une regression de notre parser produisent le
+-- meme symptome : un fait qui n'est plus celui d'hier. **Ecraser rend les deux
+-- indistinguables**, et on n'aurait aucun moyen de savoir lequel vient de se
+-- produire. C'est la seule trace qui permette de trancher.
+--
+-- Le contenu est un blob JSON et non treize colonnes miroir : une trace
+-- d'audit se lit en entier, pour comparer deux versions. Des colonnes miroir
+-- imposeraient une migration a chaque evolution d'`evenement`, et cette table
+-- doit pouvoir survivre a ces evolutions sans les suivre.
+CREATE TABLE IF NOT EXISTS evenement_revision (
+    id           INTEGER PRIMARY KEY,
+    evenement_id TEXT NOT NULL REFERENCES evenement(id),
+    remplacee_a  TEXT NOT NULL,
+    empreinte    TEXT NOT NULL,
+    contenu      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_revision_evenement
+    ON evenement_revision (evenement_id, remplacee_a DESC);
 """
+
+# Les colonnes qui decrivent LE FAIT, et elles seules. Les dates de suivi —
+# `premiere_collecte`, `derniere_verification`, `date_collecte` — en sont
+# exclues : elles bougent a chaque passage, et les inclure ferait conclure a un
+# changement du fait a chaque recollecte.
+COLONNES_DE_FAIT = (
+    "date_parution",
+    "date_acte",
+    "departement",
+    "montant_eur",
+    "devise",
+    "qualification",
+    "retenu",
+    "aberrant",
+    "cedant_denomination",
+    "cedant_type",
+    "cedant_siren",
+    "cedant_indivision",
+    "url_publication",
+)
 
 
 def chemin_base() -> Path:
@@ -200,8 +298,73 @@ def chemin_base() -> Path:
     return Path.home() / ".cache" / "fundora-prospect" / "prospects.db"
 
 
+# Marque de l'absence. Sans elle, `None` se rendrait `"None"` et se
+# confondrait avec une valeur textuelle valant litteralement « None » — un
+# `cedant_denomination` peut contenir n'importe quoi. Un octet NUL, lui, ne
+# peut pas venir de la donnee.
+#
+# **Ce n'est PAS le cas « absent contre chaine vide » qu'il protege**, contre
+# l'intuition : `None` -> "None" et `""` -> "" se distinguent deja sans lui. Le
+# seul cas ou il sert est la collision avec le mot « None » ecrit en clair, et
+# c'est celui-la qu'il faut tester — la mutation `_ABSENT = "None"` a survecu a
+# la suite entiere tant que seul le cas de la chaine vide etait couvert.
+_ABSENT = "\x00"
+
+# Separateur entre deux valeurs. Il borne chaque champ : sans lui, la frontiere
+# entre deux valeurs voisines disparait, et `("06", "1")` rend la meme
+# concatenation que `("0", "61")` — deux faits differents sous une seule
+# empreinte, donc une revision jamais tracee.
+#
+# Il ne joue en revanche aucun role contre une PERMUTATION : l'ordre des
+# colonnes est fixe, donc la position distingue deja. Deux proprietes voisines,
+# deux gardes distincts.
+_SEPARATEUR = "\x1f"
+
+
+def empreinte_du_fait(valeurs: Mapping[str, object]) -> str:
+    """Empreinte des colonnes de fait. Deterministe, sensible a l'ordre.
+
+    Une premiere version prefixait chaque valeur de son nom de colonne, au
+    motif qu'une permutation de deux champs serait sinon invisible. **C'etait
+    faux** : les colonnes sont parcourues dans un ordre fixe, donc la position
+    distingue deja. La mutation qui retirait les noms a survecu a la suite
+    entiere, et le prefixe est parti avec elle — du code qu'aucun test ne peut
+    faire echouer ne protege de rien.
+    """
+    morceaux = [
+        _ABSENT if valeurs.get(colonne) is None else str(valeurs.get(colonne))
+        for colonne in COLONNES_DE_FAIT
+    ]
+    return hashlib.sha256(_SEPARATEUR.join(morceaux).encode("utf-8")).hexdigest()
+
+
+def _completer_empreintes(connexion: sqlite3.Connection) -> None:
+    """Ajoute la colonne si elle manque, puis CALCULE les empreintes absentes.
+
+    Le calcul est la vraie migration. Laisser `''` sur les lignes existantes
+    ferait conclure a un changement des la premiere recollecte, et ecrirait une
+    revision fantome sur chaque ligne de la base — un faux positif de masse,
+    dans la table meme qui doit servir a distinguer un rectificatif d'une
+    regression.
+    """
+    colonnes = {ligne["name"] for ligne in connexion.execute("PRAGMA table_info(evenement)")}
+    if "empreinte" not in colonnes:
+        connexion.execute("ALTER TABLE evenement ADD COLUMN empreinte TEXT NOT NULL DEFAULT ''")
+
+    a_completer = connexion.execute(
+        f"SELECT id, {', '.join(COLONNES_DE_FAIT)} FROM evenement WHERE empreinte = ''"
+    ).fetchall()
+    for ligne in a_completer:
+        connexion.execute(
+            "UPDATE evenement SET empreinte = ? WHERE id = ?",
+            (empreinte_du_fait(dict(ligne)), ligne["id"]),
+        )
+    if a_completer:
+        journal.info("migration : %d empreintes calculees", len(a_completer))
+
+
 def ouvrir(chemin: Path | str | None = None) -> sqlite3.Connection:
-    """Ouvre la base, la cree si besoin, et rend une connexion prete.
+    """Ouvre la base, la cree si besoin, la migre si besoin.
 
     `foreign_keys` est active par connexion : SQLite l'ignore par defaut, et
     une contrainte declaree mais desactivee est exactement le genre de garantie
@@ -213,13 +376,41 @@ def ouvrir(chemin: Path | str | None = None) -> sqlite3.Connection:
     connexion = sqlite3.connect(cible)
     connexion.row_factory = sqlite3.Row
     connexion.execute("PRAGMA foreign_keys = ON")
+
+    version = connexion.execute("PRAGMA user_version").fetchone()[0]
     connexion.executescript(SCHEMA)
+    if version < 3:
+        # La version DECLENCHE, la presence de la colonne DECIDE de l'ALTER :
+        # sur une base neuve, `version` vaut 0 mais le schema a deja tout cree.
+        _completer_empreintes(connexion)
     connexion.execute(f"PRAGMA user_version = {VERSION_SCHEMA}")
     connexion.commit()
     return connexion
 
 
-def enregistrer(connexion: sqlite3.Connection, lead: Lead) -> None:
+@dataclass(frozen=True)
+class Ecriture:
+    """Ce qu'une ecriture a REELLEMENT change.
+
+    **Un seul champ, et c'est deliberé.** Une premiere version en portait trois
+    — `nouveau`, `revision`, et la transition observee — au motif que l'appelant
+    n'aurait pas a relire la base. Or il la relit, et volontairement : les
+    journaux disent ce que la base CONTIENT, pas ce que le code croit y avoir
+    mis. Les deux autres champs n'ont donc jamais ete lus par personne.
+
+    « On ne cree que ce qu'on utilise », applique a un attribut. Et c'est un
+    angle mort connu : `tools/symboles_morts.py` audite des symboles, pas des
+    champs — `Ecriture` etant construite, la classe passait l'audit avec deux
+    tiers de contenu mort.
+
+    Le type survit au degraissage parce qu'il NOMME le booleen : `if ecriture.
+    nouveau` se lit, `if entrepot.enregistrer(...)` ne se lit pas.
+    """
+
+    nouveau: bool
+
+
+def enregistrer(connexion: sqlite3.Connection, lead: Lead) -> Ecriture:
     """**La porte d'ecriture unique.**
 
     Le controle de type joue ici le meme role que dans `provenance.serialiser` :
@@ -242,7 +433,66 @@ def enregistrer(connexion: sqlite3.Connection, lead: Lead) -> None:
     event = lead.event
     collecte = lead.provenance.date_collecte.isoformat()
 
+    faits = {
+        "date_parution": event.date_parution.isoformat(),
+        "date_acte": event.date_acte.isoformat() if event.date_acte else None,
+        "departement": event.departement,
+        "montant_eur": event.montant_eur,
+        "devise": event.devise,
+        "qualification": event.qualification,
+        "retenu": int(event.retenu),
+        "aberrant": int(event.aberrant),
+        "cedant_denomination": event.cedant_denomination,
+        "cedant_type": str(event.cedant_type),
+        "cedant_siren": event.cedant_siren,
+        "cedant_indivision": int(event.cedant_indivision),
+        "url_publication": lead.provenance.url_publication,
+    }
+    empreinte = empreinte_du_fait(faits)
+
+    transition: tuple[str, str] | None = None
+
     with connexion:
+        # --- Le statut du cedant : ce qui a change, jamais ce qui a ete
+        #     reconfirme. Un sondage qui rend la meme reponse n'est pas un
+        #     evenement ; l'ecrire quand meme ferait grossir le journal a chaque
+        #     balayage sans rien y ajouter.
+        if event.cedant_siren:
+            ancien = connexion.execute(
+                "SELECT statut FROM cedant WHERE siren = ?", (event.cedant_siren,)
+            ).fetchone()
+            nouveau_statut = str(event.statut_cedant)
+            if ancien is not None and ancien["statut"] != nouveau_statut:
+                transition = (ancien["statut"], nouveau_statut)
+
+        # --- Le fait : a-t-il change depuis la derniere collecte ?
+        precedent = connexion.execute(
+            "SELECT empreinte, date_collecte, "
+            f"{', '.join(COLONNES_DE_FAIT)} FROM evenement WHERE id = ?",
+            (event.id,),
+        ).fetchone()
+        nouveau = precedent is None
+        if precedent is not None and precedent["empreinte"] != empreinte:
+            # La version REMPLACEE part au journal des revisions AVANT d'etre
+            # ecrasee. Un rectificatif du BODACC et une regression de notre
+            # parser produisent le meme symptome ; sans l'ancienne version, on
+            # ne peut pas trancher lequel vient de se produire.
+            connexion.execute(
+                "INSERT INTO evenement_revision "
+                "(evenement_id, remplacee_a, empreinte, contenu) VALUES (?, ?, ?, ?)",
+                (
+                    event.id,
+                    collecte,
+                    precedent["empreinte"],
+                    json.dumps(
+                        {c: precedent[c] for c in COLONNES_DE_FAIT}
+                        | {"date_collecte": precedent["date_collecte"]},
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                ),
+            )
+
         # Le cedant d'abord : la cle etrangere de `evenement` le referencera.
         # L'enrichissement est une propriete de la SOCIETE, pas de l'annonce —
         # deux annonces du meme cedant ne doivent pas produire deux verites sur
@@ -272,8 +522,8 @@ def enregistrer(connexion: sqlite3.Connection, lead: Lead) -> None:
             "  id, date_parution, date_acte, departement, montant_eur, devise,"
             "  qualification, retenu, aberrant, cedant_denomination, cedant_type,"
             "  cedant_siren, cedant_indivision, url_publication, date_collecte,"
-            "  premiere_collecte, derniere_verification"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "  premiere_collecte, derniere_verification, empreinte"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET "
             "  date_parution = excluded.date_parution,"
             "  date_acte = excluded.date_acte,"
@@ -288,7 +538,15 @@ def enregistrer(connexion: sqlite3.Connection, lead: Lead) -> None:
             "  cedant_siren = excluded.cedant_siren,"
             "  cedant_indivision = excluded.cedant_indivision,"
             "  url_publication = excluded.url_publication,"
-            "  date_collecte = excluded.date_collecte,"
+            # `date_collecte` date le FAIT STOCKE, pas le dernier passage du
+            # job. Elle n'avance donc que si le fait a change ; sinon on
+            # pretendrait avoir recollecte une donnee qu'on n'a fait que
+            # reconfirmer, et `derniere_verification` — qui dit exactement ca —
+            # n'aurait plus de raison d'exister a cote.
+            "  date_collecte = CASE WHEN evenement.empreinte = excluded.empreinte"
+            "                       THEN evenement.date_collecte"
+            "                       ELSE excluded.date_collecte END,"
+            "  empreinte = excluded.empreinte,"
             "  derniere_verification = excluded.derniere_verification",
             (
                 event.id,
@@ -308,8 +566,24 @@ def enregistrer(connexion: sqlite3.Connection, lead: Lead) -> None:
                 collecte,
                 collecte,
                 collecte,
+                empreinte,
             ),
         )
+
+        if transition is not None:
+            connexion.execute(
+                "INSERT INTO cedant_journal "
+                "(siren, observe_a, statut_avant, statut_apres, motif) VALUES (?, ?, ?, ?, ?)",
+                (
+                    event.cedant_siren,
+                    collecte,
+                    transition[0],
+                    transition[1],
+                    event.motif_enrichissement,
+                ),
+            )
+
+    return Ecriture(nouveau=nouveau)
 
 
 # --- Lecture -------------------------------------------------------------------
@@ -587,3 +861,124 @@ def compteurs_de_collecte(
         "plafond_atteint": any(ligne["plafond_atteint"] for ligne in lignes),
         "collecte_partielle": any(ligne["terminee_a"] is None for ligne in lignes),
     }
+
+
+# --- Les deux journaux : transitions de statut, revisions de fait -------------
+
+
+@dataclass(frozen=True)
+class Transition:
+    """Un changement de statut observe, date."""
+
+    siren: str
+    observe_a: date
+    statut_avant: StatutEntreprise
+    statut_apres: StatutEntreprise
+    motif: str
+
+    @property
+    def sortie_du_flux(self) -> bool:
+        """Vrai quand la societe cesse d'etre un prospect.
+
+        C'est la lecture metier du journal : `active -> cessee` date le moment
+        ou le produit de cession est descendu aux associes. Le lead ne disparait
+        pas, il SORT — et on sait quand.
+        """
+        return self.statut_apres is StatutEntreprise.CESSEE
+
+
+def transitions(
+    connexion: sqlite3.Connection,
+    *,
+    depuis: date | None = None,
+    siren: str | None = None,
+) -> list[Transition]:
+    """Les changements de statut observes. Repond a « pourquoi ce lead a-t-il
+    disparu du classement ? » — la seule question qu'un decompte d'ecartes ne
+    peut pas trancher, parce qu'il dit combien et jamais depuis quand."""
+    clauses: list[str] = []
+    parametres: list[object] = []
+    if depuis is not None:
+        clauses.append("observe_a >= ?")
+        parametres.append(depuis.isoformat())
+    if siren is not None:
+        clauses.append("siren = ?")
+        parametres.append(siren)
+    ou = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+
+    return [
+        Transition(
+            siren=ligne["siren"],
+            observe_a=date.fromisoformat(ligne["observe_a"]),
+            statut_avant=StatutEntreprise(ligne["statut_avant"]),
+            statut_apres=StatutEntreprise(ligne["statut_apres"]),
+            motif=ligne["motif"],
+        )
+        for ligne in connexion.execute(
+            "SELECT * FROM cedant_journal" + ou + " ORDER BY observe_a DESC, id DESC",
+            parametres,
+        )
+    ]
+
+
+@dataclass(frozen=True)
+class Revision:
+    """Une version remplacee d'un evenement, et ce qui a change."""
+
+    evenement_id: str
+    remplacee_a: date
+    contenu: dict[str, object]
+
+    def champs_modifies(self, actuel: Mapping[str, object]) -> dict[str, tuple[object, object]]:
+        """Les FAITS qui different entre la version remplacee et une autre.
+
+        C'est cette comparaison qui permet de trancher entre un rectificatif du
+        BODACC et une regression de notre parser : un montant qui change seul
+        ressemble a un rectificatif, un montant qui devient `None` sur des
+        dizaines de lignes le meme jour ressemble a un parser casse.
+
+        **Restreinte a `COLONNES_DE_FAIT`.** Le contenu archive porte aussi la
+        `date_collecte` de la version remplacee — un contexte utile, mais qui
+        differe TOUJOURS de la version courante, par construction. L'inclure
+        ferait apparaitre un champ modifie dans chaque comparaison et noierait
+        celui qui a reellement bouge.
+        """
+        return {
+            champ: (self.contenu[champ], actuel.get(champ))
+            for champ in COLONNES_DE_FAIT
+            if champ in self.contenu
+            and champ in actuel
+            and self.contenu[champ] != actuel.get(champ)
+        }
+
+
+def revisions(
+    connexion: sqlite3.Connection,
+    *,
+    evenement_id: str | None = None,
+    depuis: date | None = None,
+) -> list[Revision]:
+    """Les versions remplacees. Sans elles, un rectificatif et une regression
+    de parser sont indistinguables — les deux produisent un fait qui n'est plus
+    celui d'hier."""
+    clauses: list[str] = []
+    parametres: list[object] = []
+    if evenement_id is not None:
+        clauses.append("evenement_id = ?")
+        parametres.append(evenement_id)
+    if depuis is not None:
+        clauses.append("remplacee_a >= ?")
+        parametres.append(depuis.isoformat())
+    ou = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+
+    return [
+        Revision(
+            evenement_id=ligne["evenement_id"],
+            remplacee_a=date.fromisoformat(ligne["remplacee_a"]),
+            contenu=json.loads(ligne["contenu"]),
+        )
+        for ligne in connexion.execute(
+            "SELECT * FROM evenement_revision" + ou + " ORDER BY remplacee_a DESC, id DESC",
+            parametres,
+        )
+    ]

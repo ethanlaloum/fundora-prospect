@@ -1305,6 +1305,125 @@ part et annonçait alors 10 sociétés là où il n'y en a qu'une. Les deux lign
 ressemblent et ont deux rôles : l'une évite des appels, l'autre nomme une
 grandeur. Un commentaire le dit, pour qu'aucune relecture n'en « simplifie » une.
 
+### Palier 4 ✅ — le journal des transitions de statut
+
+`cedant_journal` : **une ligne par CHANGEMENT observé, jamais par sondage.**
+
+Trois choses n'y entrent pas, et c'est ce qui fait sa valeur :
+
+- **La première observation n'est pas une transition.** `cedant.enrichi_a` la
+  date déjà. L'écrire ferait ~3 300 lignes au premier balayage PACA, toutes
+  sans information.
+- **Un sondage qui confirme n'écrit rien.** Sinon la table grossit à chaque
+  passage en ne disant rien de plus.
+- **Une transition immobile est refusée par le schéma**, `CHECK (statut_avant
+  <> statut_apres)` — le même barrage que les `CHECK` de traçabilité du
+  palier 1 : il protège du code pas encore écrit.
+
+**Ce n'est pas une table d'audit, c'est un signal métier.** `active → cessee`
+date le moment où la société cédante a disparu, donc où le produit de cession
+est descendu aux associés : c'est la **date de sortie du prospect**. Le lead ne
+s'évanouit pas du classement, il en sort, et on sait quel jour. C'est la seule
+question qu'un décompte d'écartés ne peut pas trancher — il dit *combien*,
+jamais *depuis quand*.
+
+`sortie_du_flux` est testée sur un cas qui n'en est pas une (`inconnu →
+active`) : sans lui, une propriété qui rendrait toujours `True` passerait le
+test nominal.
+
+**`ResultatCollecte.transitions` et `.revisions` sont RELUS depuis la base**,
+pas accumulés pendant la boucle. Un compteur tenu au vol dirait ce que le code
+croit avoir écrit ; la relecture dit ce que la base contient. Les deux devraient
+coïncider — c'est justement pour ça qu'il faut lire, sinon on ne le saurait
+jamais.
+
+### Palier 5 ✅ — les révisions de fait, et la première migration qui ne peut plus être implicite
+
+`evenement.empreinte` + `evenement_revision`. Un rectificatif du BODACC et une
+régression de notre parser produisent le même symptôme : un fait qui n'est plus
+celui d'hier. **Écraser rend les deux indistinguables** ; la version remplacée
+est la seule trace qui permette de trancher, et `champs_modifies` dit lequel a
+bougé — un montant qui change seul ressemble à un rectificatif, un montant qui
+s'annule sur des dizaines de lignes le même jour ressemble à un parser cassé.
+
+**L'empreinte ne porte que les colonnes de FAIT.** Les dates de suivi en sont
+exclues : elles bougent à chaque passage, et les inclure conclurait à un
+changement du fait à chaque recollecte — une révision fantôme par ligne et par
+balayage, dans la table même qui doit servir à distinguer un vrai changement.
+
+**`date_collecte` date le FAIT STOCKÉ, `derniere_verification` date le
+passage.** Les faire avancer ensemble ferait de la seconde un doublon de la
+première, et on prétendrait avoir recollecté une donnée qu'on n'a fait que
+reconfirmer.
+
+**Le contenu archivé est un blob JSON, pas treize colonnes miroir.** Une trace
+d'audit se lit en entier pour comparer deux versions ; des colonnes miroir
+imposeraient une migration à chaque évolution d'`evenement`, alors que cette
+table doit survivre à ces évolutions sans les suivre.
+
+**`VERSION_SCHEMA` cesse ici d'être décoratif.** Les versions 1 et 2
+n'ajoutaient que des tables, et `IF NOT EXISTS` suffisait. La v3 ajoute une
+*colonne*, donc un `ALTER TABLE` — et surtout elle doit **calculer** les
+empreintes des lignes existantes. Laisser `''` ferait conclure à un changement
+dès la première recollecte : le faux positif de masse décrit ci-dessus.
+
+#### Sept mutations survivantes sur huit — dont trois d'une famille déjà nommée
+
+Balayage passé sur le code des deux paliers : **huit mutations, sept
+survivantes au premier passage**, zéro après correction. La huitième
+(`sorted(morceaux)`, qui ferait hacher un ensemble non ordonné) était déjà
+gardée.
+
+| Mutation | Premier passage | Ce qui manquait |
+|---|---|---|
+| `_ABSENT` vaut la chaîne `"None"` | **survit** | le test ne couvrait que la chaîne vide |
+| `_SEPARATEUR` devient `""` | **survit** | aucun test sur la frontière entre valeurs |
+| `transitions()` ignore `depuis` | **survit** | corpus à une seule date |
+| `revisions()` ignore `depuis` | **survit** | idem |
+| le `motif` du journal porte le statut | **survit** | `motif` n'était asserté nulle part |
+| `Ecriture.nouveau` vaut toujours `True` | **survit** | `evenements_nouveaux` non asserté |
+| `url_publication` sort de `COLONNES_DE_FAIT` | **survit** | 3 colonnes couvertes sur 13 |
+| l'empreinte hache un ensemble non ordonné | détectée | — |
+
+Trois enseignements, dont deux sont des rappels et un est nouveau.
+
+**Rappel — le corpus dégénéré, encore, deux fois.** Les filtres `depuis` ne
+pouvaient pas être pris en défaut parce que toutes les transitions du corpus
+portaient la même date, et `evenements_nouveaux` ne pouvait pas l'être parce
+que le corpus était entièrement neuf : `evenements_ecrits` et
+`evenements_nouveaux` y valaient le même nombre. Les nouveaux corpus séparent
+les grandeurs — trois balayages à trois dates, et un second passage qui réécrit
+une ligne connue en n'en apportant qu'une seule.
+
+**Rappel — un commentaire qui décrit un trou ne le referme pas.** Le
+commentaire de `_ABSENT` disait déjà, noir sur blanc, que la mutation avait
+survécu et que le cas de la chaîne vide n'était pas celui qu'il protégeait.
+Constat juste, laissé tel quel : le test manquant n'avait pas été écrit. **Une
+lucidité en commentaire n'est pas un garde-fou** — elle documente la dette, elle
+ne la paie pas. Même chose pour la docstring du test de permutation, qui
+invoquait encore un préfixe de nom retiré du code deux commits plus tôt : le
+chiffre qui survit à sa source, appliqué cette fois à une justification.
+
+**Nouveau — un CHAMP mort échappe à l'audit comme un symbole mort lui
+échappait.** `Ecriture` était rendue avec trois champs ; un seul, `nouveau`,
+était lu. Les deux autres justifiaient d'éviter à l'appelant de relire la base
+— alors que `collecte` la relit, **délibérément**, parce que les journaux
+doivent dire ce que la base contient et non ce que le code croit y avoir mis.
+La classe étant construite, `tools/symboles_morts.py` la voyait vivante : il
+audite des symboles, pas des attributs. C'est la même limite que pour les
+branches inatteignables, déplacée d'un cran — et le même remède, l'écrire ici
+plutôt que d'élargir l'outil.
+
+**Nouveau — un test qui énumère les cas ne couvre que les cas énumérés.**
+`test_chaque_colonne_de_fait_declenche_une_revision` est paramétré sur trois
+colonnes. Il a l'air d'un test exhaustif — son nom dit « chaque » — et il en
+laissait dix sans garde. Le remède n'est pas d'allonger la liste, qui dériverait
+du schéma au premier ajout de colonne : c'est un test **structurel** qui dérive
+`COLONNES_DE_FAIT` du `PRAGMA table_info` moins une liste de colonnes de suivi
+écrite en clair. Ajouter une colonne au schéma sans la classer dans l'un des
+deux camps fait désormais échouer la suite — le classement devient une décision,
+plus un oubli.
+
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
 **Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc
