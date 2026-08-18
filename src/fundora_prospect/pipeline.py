@@ -193,6 +193,64 @@ def resumer(stats: dict[str, Any]) -> str:
     return resume
 
 
+# --- Filtrage ------------------------------------------------------------------
+#
+# Cette etape est partagee par les DEUX consommateurs du coeur : la recherche
+# en direct, et le job de collecte qui alimentera la base. Elle est donc isolee
+# ici plutot que recopiee dans chacun.
+#
+# Ce qui divergerait autrement n'est pas la boucle — trois `if`, personne ne se
+# trompe dessus — c'est le **vocabulaire des motifs** et l'**ordre des tests**.
+# Un motif ecrit « apport en nature » d'un cote et « apport » de l'autre casse
+# tout comptage qui agrege les deux sources, sans qu'aucun test ne rougisse. Et
+# l'ordre decide quel motif est compte quand une annonce en cumule plusieurs :
+# un apport a 3 000 EUR est un apport, pas un montant insuffisant.
+#
+# Ce vocabulaire n'etait garde par AUCUN test avant l'extraction : une mutation
+# remplacant le motif par un mot quelconque laissait les 436 tests verts. Voir
+# `tests/test_pipeline.py`, ecrit en meme temps que cette section.
+
+
+def motif_ecart(annonce: Annonce, montant_min: float = 0.0) -> str | None:
+    """Le motif pour lequel cette annonce n'est pas un candidat, ou None.
+
+    L'ordre des tests est significatif : le premier motif rencontre est celui
+    qui sera compte. Il va de la qualite de la donnee vers le critere
+    commercial, du plus structurel au plus reglable.
+    """
+    prix = annonce.prix
+    if not prix.retenu:
+        return str(prix.qualification).replace("_", " ")
+    if prix.aberrant:
+        return "montant aberrant"
+    if (prix.montant or 0) < montant_min:
+        # Seul motif de ce bloc qui depende d'un parametre et non du fait.
+        # Le job de collecte appellera donc avec `montant_min=0` : le seuil est
+        # un filtre de LECTURE, sinon le relever imposerait une recollecte.
+        return "sous le montant minimum"
+    return None
+
+
+def repartir(
+    annonces: Sequence[Annonce], *, montant_min: float = 0.0
+) -> tuple[list[Annonce], dict[str, int]]:
+    """Separe les candidats des ecartes, et compte ces derniers par motif.
+
+    Le decompte est rendu **modifiable** : l'appelant y ajoute les refus de ses
+    propres etapes — statut de la societe cedante, provenance incomplete — qui
+    n'existent qu'apres un appel reseau et ne sont donc pas partageables ici.
+    """
+    candidats: list[Annonce] = []
+    ecartes: dict[str, int] = {}
+    for annonce in annonces:
+        motif = motif_ecart(annonce, montant_min)
+        if motif is None:
+            candidats.append(annonce)
+        else:
+            ecartes[motif] = ecartes.get(motif, 0) + 1
+    return candidats, ecartes
+
+
 # --- Le pipeline ---------------------------------------------------------------
 
 
@@ -244,25 +302,11 @@ def executer(
     )
     annonces = recherche.annonces
 
-    ecartes: dict[str, int] = {}
+    # 1. Filtrage sans appel reseau : inutile d'enrichir ce qu'on jettera.
+    candidats, ecartes = repartir(annonces, montant_min=montant_min)
 
     def ecarter(motif: str) -> None:
         ecartes[motif] = ecartes.get(motif, 0) + 1
-
-    # 1. Filtrage sans appel reseau : inutile d'enrichir ce qu'on jettera.
-    candidats: list[Annonce] = []
-    for annonce in annonces:
-        prix = annonce.prix
-        if not prix.retenu:
-            ecarter(str(prix.qualification).replace("_", " "))
-            continue
-        if prix.aberrant:
-            ecarter("montant aberrant")
-            continue
-        if (prix.montant or 0) < montant_min:
-            ecarter("sous le montant minimum")
-            continue
-        candidats.append(annonce)
 
     # 2. Pre-classement sans enrichissement, pour n'enrichir que le haut du
     #    panier : l'enrichissement coute un appel API par lead.
