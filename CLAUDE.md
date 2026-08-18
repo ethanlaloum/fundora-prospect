@@ -550,9 +550,27 @@ Deux règles apprises en écrivant l'outil :
   qui crie au loup est désactivé dans la semaine.** Le biais va donc vers le
   silence — il peut manquer un mort, il ne doit pas en inventer.
 
-#### La limite de l'outil : il voit des symboles, pas des expressions
+#### Les trois familles que l'audit ne voit pas
 
-Trouvée en Phase 6, par un cas concret. `provenance.base_legale` s'écrit :
+Elles se sont trouvées une par une, et elles ont la **même cause** : l'outil
+ramasse les `ClassDef` et `FunctionDef` de **premier niveau** de `src/`, puis
+cherche leur nom en position d'appel. Tout ce qui n'est pas un symbole de
+premier niveau lui est invisible, quel que soit son degré de mort.
+
+| Famille | Exemple sur ce projet | Pourquoi invisible |
+|---|---|---|
+| **Expressions inatteignables** | le repli `INCONNU` de `base_legale` | une branche n'est pas un symbole |
+| **Attributs jamais lus** | `Ecriture.revision`, `Ecriture.transition` | la classe est construite, donc vivante |
+| **Structures de données** | une table ou une colonne que rien ne lit | hors du langage audité |
+
+Les trois se ressemblent à l'usage : du code qu'on lit, qu'on maintient, qu'on
+migre — et que rien n'exécute. Aucune n'est signalée, et **aucune ne le sera** :
+voir « on ne corrige pas l'outil », plus bas. Ce qui les rattrape est ailleurs —
+la revue, la mutation, et pour les tables la règle « on ne crée que ce qu'on
+utilise », qui les empêche d'exister plutôt que de les détecter.
+
+**Famille 1 — les expressions.** Trouvée en Phase 6, par un cas concret.
+`provenance.base_legale` s'écrit :
 
 ```python
 return BASES_LEGALES.get(type_cedant, BASES_LEGALES[TypeCedant.INCONNU])
@@ -567,11 +585,39 @@ ne ramasse que les `ClassDef` et `FunctionDef` de **premier niveau** dans
 inatteignable, une clause `else` que rien ne peut atteindre — rien de tout cela
 n'est un symbole, donc rien de tout cela n'est audité.
 
-**On ne corrige pas l'outil.** Détecter du code inatteignable demande une
-analyse de flux, pas une lecture de noms : c'est un autre outil, avec un autre
-taux de faux positifs, et la règle « un audit qui crie au loup est désactivé
-dans la semaine » s'appliquerait immédiatement. La limite est écrite ici pour
-qu'on sache où l'audit s'arrête, pas pour être comblée.
+**Famille 2 — les attributs.** Trouvée au palier 5, sur `Ecriture`. La classe
+était rendue avec trois champs ; **un seul, `nouveau`, était lu**. Les deux
+autres se justifiaient par « éviter à l'appelant de relire la base » — alors que
+`collecte` la relit délibérément, parce que les journaux doivent dire ce que la
+base *contient* et non ce que le code croit y avoir mis. La justification
+contredisait le design retenu, et personne ne l'a vu pendant deux commits.
+
+L'audit, lui, ne pouvait pas la voir : `Ecriture(...)` apparaît en position
+d'appel, donc la classe est vivante — et l'outil s'arrête là. Il ne descend pas
+dans les champs, pas plus qu'il ne descend dans les branches. **Une classe
+vivante peut être aux deux tiers morte.**
+
+Le cas est plus insidieux que celui des expressions, parce qu'un champ mort ne
+se contente pas de ne rien faire : il **affirme quelque chose**. Un lecteur qui
+voit `Ecriture.transition` en conclut que l'appelant s'en sert, et se demande
+lequel. C'est de la documentation fausse au format d'un type.
+
+**Famille 3 — les tables et les colonnes.** Écrite au gate de la Phase 6, avant
+d'avoir un cas : « une colonne que rien ne lit est de la donnée morte, et
+`tools/symboles_morts.py` ne voit pas les colonnes ». C'est la raison pour
+laquelle `collecte_ecart` n'a pas été créée et pour laquelle aucune colonne de
+score n'existe. Ici la parade n'est pas la détection mais l'abstention : on ne
+crée une table qu'au palier qui la lit.
+
+**On ne corrige pas l'outil**, pour aucune des trois. Détecter du code
+inatteignable demande une analyse de flux, pas une lecture de noms. Détecter un
+attribut jamais lu demande de résoudre les types — or l'outil ne les résout
+délibérément pas, et cette tolérance est ce qui l'empêche de crier au loup sur
+les homonymes. Détecter une colonne morte demande de lire du SQL en chaînes.
+Chacune est un autre outil, avec un autre taux de faux positifs, et la règle
+« un audit qui crie au loup est désactivé dans la semaine » s'appliquerait
+immédiatement. **Ces limites sont écrites pour qu'on sache où l'audit s'arrête,
+pas pour être comblées.**
 
 Ce que ça implique en pratique : **une mutation qui survit ne prouve pas
 toujours un trou de test.** Elle peut porter sur du code que rien n'atteint. Il
@@ -1406,13 +1452,9 @@ chiffre qui survit à sa source, appliqué cette fois à une justification.
 
 **Nouveau — un CHAMP mort échappe à l'audit comme un symbole mort lui
 échappait.** `Ecriture` était rendue avec trois champs ; un seul, `nouveau`,
-était lu. Les deux autres justifiaient d'éviter à l'appelant de relire la base
-— alors que `collecte` la relit, **délibérément**, parce que les journaux
-doivent dire ce que la base contient et non ce que le code croit y avoir mis.
-La classe étant construite, `tools/symboles_morts.py` la voyait vivante : il
-audite des symboles, pas des attributs. C'est la même limite que pour les
-branches inatteignables, déplacée d'un cran — et le même remède, l'écrire ici
-plutôt que d'élargir l'outil.
+était lu. Voir la troisième famille dans les limites de
+`tools/symboles_morts.py`, où les trois angles morts de l'audit sont écrits
+ensemble.
 
 **Nouveau — un test qui énumère les cas ne couvre que les cas énumérés.**
 `test_chaque_colonne_de_fait_declenche_une_revision` est paramétré sur trois
@@ -1423,6 +1465,62 @@ du schéma au premier ajout de colonne : c'est un test **structurel** qui dériv
 écrite en clair. Ajouter une colonne au schéma sans la classer dans l'un des
 deux camps fait désormais échouer la suite — le classement devient une décision,
 plus un oubli.
+
+### Leçon générale : la mutation n'est pas une vérification, c'est l'écriture du test
+
+**C'est la mesure la plus importante du projet, parce qu'elle porte sur la
+méthode elle-même et non sur le produit.**
+
+Quatre paliers, quatre passes de mutation. Le chiffre qui compte est celui du
+**premier passage** — combien de mutations survivaient avant qu'on corrige quoi
+que ce soit :
+
+| Palier | Survivantes au 1ᵉʳ passage | Après correction |
+|---|---|---|
+| 1 — schéma et porte d'écriture | **2 / 10** | 0 |
+| 2 — lecture et recalcul | **0 / 14** | 0 |
+| 3 — job de collecte | **1 / 16** | 0 |
+| 4-5 — les deux journaux | **7 / 8** | 0 |
+
+**Attention au piège de lecture, qui est le piège signature de ce projet.** Ce
+tableau a d'abord été écrit « 0, 0, 0, 7 » — en comparant le chiffre *après
+correction* des trois premiers paliers au chiffre *de premier passage* du
+quatrième. Deux mesures différentes dans une même colonne. La série ci-dessus
+applique la même mesure aux quatre.
+
+**Ce qui a changé entre le palier 3 et le palier 4-5 n'est pas la difficulté du
+code, c'est l'ordre des opérations.** Aux paliers 1 à 3, la mutation était
+entrelacée avec l'écriture : on altérait l'implémentation à mesure qu'on
+écrivait le test, souvent *avant* d'écrire la ligne de production
+correspondante — le palier 3 bis en porte la trace explicite (« mutation faite
+avant d'écrire la moindre ligne »). Aux paliers 4 et 5, le code et les tests ont
+été écrits en entier, verts, et la passe de mutation est venue **ensuite**,
+comme une relecture.
+
+Sept sur huit. Le même auteur, la même suite, les mêmes règles déjà écrites dans
+ce fichier — et deux des sept trous relevaient de familles nommées dans ce
+document même. **Connaître la règle n'a pas suffi.**
+
+L'explication tient en une phrase : *un test écrit après un code vert est écrit
+pour confirmer ce que le code fait, pas pour interdire ce qu'il ne doit pas
+faire.* On regarde l'implémentation, on assertionne ce qu'on y voit, et on
+obtient un test qui décrit fidèlement le comportement courant — y compris ses
+défauts. La mutation, elle, pose l'autre question : *que faudrait-il casser pour
+que ce test rougisse ?* Posée pendant l'écriture, elle façonne l'assertion.
+Posée après, elle ne fait plus que compter les dégâts.
+
+**Règle de travail : aucune passe de mutation « finale ».** Chaque assertion
+non triviale se mute au moment où on l'écrit, avant de passer à la suivante. La
+passe globale reste utile — c'est elle qui a trouvé les sept — mais elle doit
+être un filet, pas la méthode. Quand elle rapporte beaucoup, ce n'est pas une
+bonne nouvelle sur sa propre efficacité : c'est le signal qu'on a écrit les
+tests dans le mauvais ordre.
+
+**Limite honnête de cette mesure.** Quatre points, des mutations choisies à la
+main, et un nombre de mutations qui varie d'un palier à l'autre (8 à 16) —
+ce n'est pas un protocole, c'est un faisceau. Il est écrit ici parce qu'aucune
+autre trace du projet ne dit si sa méthode marche, et qu'un faisceau mesuré
+vaut mieux qu'une conviction.
 
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
