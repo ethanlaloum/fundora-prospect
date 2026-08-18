@@ -592,7 +592,7 @@ et son contenu n'était lu par personne. Un motif écrit « apport en nature »
 d'un côté et « apport » de l'autre aurait cassé tout comptage agrégeant les
 deux sources sans qu'aucun test ne rougisse.
 
-#### C'est le quatrième visage du même mécanisme
+#### Les six visages du même mécanisme
 
 | Ce qu'on vérifiait | Ce qu'on croyait vérifier | Pourquoi c'était aveugle |
 |---|---|---|
@@ -600,6 +600,8 @@ deux sources sans qu'aucun test ne rougisse.
 | **Le compteur a une valeur** (`annonces_examinees`) | qu'il décrit sa population | il décrivait un budget, sous un nom qui promet un total |
 | **L'exemple est présent** (`SKILL.md`) | qu'il est à jour | la valeur avait survécu au changement de sa source |
 | **La structure est non vide** (`ecartes`) | qu'elle dit la bonne chose | la présence et le contenu sont deux propriétés distinctes |
+| **Le nombre est exact** (`annonces_exploitables == 3`) | qu'il désigne la bonne grandeur | le corpus rendait deux grandeurs égales |
+| **Le code traite bien l'entrée** (`collecte` avec `enrichis`) | qu'il traite bien le RÉEL | l'entrée était fabriquée, la source ne la produit jamais |
 
 Le mécanisme commun : **ce qui est facile à vérifier se substitue à ce qui
 compte.** Présence, nom, non-vacuité, existence — quatre propriétés bon marché
@@ -682,6 +684,53 @@ départage pas.
 
 Les quatre trous ont été fermés, et les quatre mutations sont rejouées : quatre
 détectées. La suite passe de 446 à 450 tests.
+
+#### Le sixième visage : un test alimenté à la main, sur une donnée que la source ne produit jamais
+
+C'est le plus difficile à voir des six, et pour une raison structurelle :
+**aucune mutation du code de production ne le révèle.**
+
+Le cas, au palier 2. `lire` accepte un dict `collecte` porteur des compteurs de
+population. Le test qui vérifiait que la réserve « l'étendue de la collecte
+n'est pas connue » disparaît bien lui passait ceci :
+
+```python
+collecte={
+    "annonces_publiees": 662,
+    ...
+    "classables_parmi_les_enrichis": 1,   # <- n'existe que sur le chemin direct
+    "enrichis": 1,                        # <- idem
+}
+```
+
+Le test passait. `resumer` traitait correctement ce dict. Mais **la source
+réelle — `entrepot.compteurs_de_collecte`, écrite un palier plus tard — ne
+produit jamais ces deux clés** : ce sont des compteurs de budget
+d'enrichissement, qui n'ont de sens que sur le chemin direct. Le test validait
+un contrat que personne n'honore.
+
+Pourquoi la mutation ne le voit pas : muter le code de production ne change pas
+l'entrée du test. Le test continue de fabriquer son dict, et la mutation est
+détectée ou non selon qu'elle touche le chemin *fabriqué*. Le défaut n'est pas
+dans le code testé, il est dans **l'écart entre l'entrée du test et l'entrée
+réelle** — un espace où aucune mutation ne va.
+
+Ce que ça implique, et qui coûte plus cher que les cinq autres remèdes :
+
+**Un test dont l'entrée est fabriquée ne prouve rien sur la production tant
+qu'un autre test n'a pas branché le même chemin sur la vraie source.** Les
+doubles restent légitimes — la suite entière repose dessus, et elle tourne en
+5 secondes sans réseau grâce à eux. Mais chaque contrat entre deux modules doit
+avoir **au moins un** test qui les branche réellement l'un sur l'autre.
+
+Ici, c'est `tests/test_collecte.py::test_la_reserve_d_etendue_disparait_quand_le_job_a_tourne` :
+il fait tourner le job, lit la table qu'il a remplie, et passe ces compteurs-là
+à `resumer`. C'est ce test qui a montré que le dict du palier 2 était une
+fiction — pas une mutation, pas une relecture.
+
+Le signal à surveiller : **un littéral dans un test qui décrit la sortie d'un
+autre module.** Chaque clé écrite à la main y est une hypothèse sur un contrat,
+et une hypothèse non vérifiée finit par être fausse.
 
 ### Leçon générale : un tri en amont est un filtre
 
@@ -1075,6 +1124,35 @@ gelé à la collecte.
 nombre figé qu'on ne peut plus recalculer ni justifier. Les seules qui restent
 invisibles sont celles sans cédant : `construire_annonce` rend `None`, il n'y a
 même pas d'`id`. Elles ne peuvent être que **comptées**.
+
+#### `collecte_ecart` : table VALIDÉE au gate, ABANDONNÉE au palier 3
+
+Elle figurait dans le schéma proposé, elle a été validée, et elle n'existe pas.
+La décision est écrite ici plutôt que d'avoir simplement disparu — sinon
+quelqu'un relira le schéma initial, constatera la table manquante, et la
+recréera en croyant réparer un oubli.
+
+**Le motif.** Elle devait porter le décompte des refus par motif, une ligne par
+`(collecte, motif)`. Mais la même proposition décidait de **stocker les annonces
+écartées** dans `evenement`. Les deux décisions se contredisent sans que ça se
+voie : dès lors que les écartés sont en base avec leur `qualification`, leur
+décompte par motif se **recalcule** à la lecture, par la même `motif_ecart_faits`
+que partout ailleurs.
+
+La table aurait donc figé une valeur dérivable — et elle aurait dérivé le jour
+du premier renommage de motif : la base aurait continué à servir « apport en
+nature » quand le code dit « apport ». C'est la leçon « un paramètre recopié
+dérive de sa source », appliquée à une table.
+
+Ne restent en base que les **quatre nombres qu'aucune relecture ne peut
+retrouver** : `annonces_publiees` (ce que le BODACC déclarait contenir),
+`annonces_rapatriees` (ce qu'on en a lu), `sans_cedant_ou_illisibles` (écartées
+avant d'avoir un `id`, donc sans ligne où être comptées) et `plafond_atteint`.
+
+**Le test de recréation :** si une donnée peut se recalculer depuis ce qui est
+déjà stocké, la stocker en second exemplaire crée une divergence future, pas une
+commodité. Si elle ne le peut pas, elle doit être stockée. C'est le seul critère
+qui a servi à trancher le contenu de `collecte`.
 
 **`montant_min` disparaît de la collecte.** Le job ramasse tout ; le seuil
 devient un filtre de lecture. Sinon le relever imposerait une recollecte.
