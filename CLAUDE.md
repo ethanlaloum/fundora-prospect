@@ -231,6 +231,19 @@ exploiter une base constituée illégalement.
    `--no-verify` : c'est un filet, la garantie est le test dans `pytest`.
    Git conserve l'historique — un nom commité une fois est exposé le jour où le
    dépôt passe en public.
+
+   **La base de données de la Phase 6 est le premier stockage DURABLE soumis à
+   cette contrainte.** Jusqu'ici le seul stockage persistant du projet était un
+   cache HTTP jetable. La base, elle, accumule — et elle accumule des noms de
+   personnes : `_denomination` (`bodacc.py:97`) retombe sur
+   `nom + nomUsage + prenom` quand le cédant est une personne physique, soit
+   ~20 % des cédants. Le champ `cedant_denomination` **est** un nom de personne
+   sur ce segment.
+
+   Conséquence, décidée au gate de la Phase 6 : le fichier SQLite vit **hors du
+   dépôt**, `~/.cache/fundora-prospect/prospects.db`, surchargeable par
+   `FUNDORA_DB`. Le `.gitignore` est un filet, pas la garantie — même
+   raisonnement que pour les dumps d'exploration. Voir la Phase 6.
 5. **Scoring explicable.** Chaque score sort avec le détail de son calcul.
    Pas de boîte noire.
 6. **Un apport en nature n'est pas une cession.** Règle métier, pas commodité
@@ -854,6 +867,129 @@ d'erreur explicite. Il doit être démontrable en live.
 README : architecture, choix de conformité, et le **volume réel mesuré**
 (nombre de cessions > 200 k€ sur 12 mois en PACA).
 Gate : démo end-to-end en une commande.
+
+## Phase 6 — interface web sur le même cœur
+
+Le plugin Claude Code reste. On ajoute une seconde surface, pas un
+remplacement :
+
+```
+coeur Python  ─┬─  mcp_server.py   ->  Claude Code
+               └─  api.py (FastAPI) ->  navigateur
+```
+
+**Le back-end appelle le code Python directement.** Il n'appelle pas l'API
+Claude pour exécuter le pipeline : un score qui traverse un LLM cesse d'être
+reproductible et auditable, ce qui détruit l'argument central du projet.
+
+### Étape 1 ✅ — le pipeline est descendu dans le cœur
+
+`pipeline.py` porte `executer`, `resumer`, `normaliser_departements` et
+`evaluer_hypothese`. `mcp_server.py` est passé de 440 à 253 lignes, dont
+l'essentiel est désormais des descriptions d'outils — c'est-à-dire du prompt.
+
+Les deux fonctions réseau — `rechercher` et `enrichir` — sont des **paramètres**
+de `executer`, avec les vraies fonctions en défaut. Chaque surface est sa
+propre racine de composition. C'est aussi ce qui garde vivantes les douze
+substitutions de `tests/test_mcp_server.py` : les deux raisons sont vraies, et
+il faut dire les deux.
+
+`LIMITE_MAX` a perdu un double rôle au passage : il bornait l'argument `limite`
+**et**, sous la forme `LIMITE_MAX * 2`, le budget d'appels API. Le budget
+s'appelle désormais `PLAFOND_ENRICHISSEMENTS`, avec `CANDIDATS_PAR_LEAD` pour
+le facteur. Encore un nom qui promettait une chose et en décrivait deux.
+
+### Étape 1 bis ✅ — les motifs de refus se décident à un seul endroit
+
+`motif_ecart` et `repartir` sont partagés par la recherche en direct et par le
+job de collecte à venir. Ce qui divergerait sinon n'est pas la boucle — trois
+`if` — mais le **vocabulaire des motifs** et l'**ordre des tests**.
+
+**Ce vocabulaire n'était gardé par aucun test.** Mutation faite avant d'écrire
+la moindre ligne : remplacer `str(prix.qualification)` par la chaîne `"ecarte"`
+laissait les 436 tests verts. Les tests existants vérifiaient que `ecartes`
+était non vide et que sa somme était positive — jamais ce qu'il y avait dedans.
+C'est le même angle mort que « un symbole jamais construit échappe à tous les
+tests », appliqué à une **valeur** au lieu d'un symbole. `tests/test_pipeline.py`
+le ferme, vérifié par quatre mutations.
+
+### Décisions du gate Phase 6
+
+**On ne calcule pas à la volée.** Un job de collecte balaye sans contrainte de
+temps de réponse et écrit en base ; l'API ne fait que lire.
+`PLAFOND_ENRICHISSEMENTS` et le plafond de rapatriement cessent d'être des
+limites subies.
+
+**La base vit hors du dépôt.** Voir la contrainte 4 : c'est le premier stockage
+durable du projet à porter des noms de personnes.
+
+**Le score n'est jamais figé en base.** Il est recalculé à la lecture. La
+fraîcheur décroît dès le premier jour, demi-vie 180 jours, sans plateau : un
+score stocké est faux le lendemain, et le figer industrialiserait dans une
+table le défaut signature de ce projet — un chiffre qui survit à sa source. La
+grille est par ailleurs rechargeable sans toucher au code ; un score gelé
+annulerait cette propriété. Et `evaluer` est pure, déterministe, avec
+`aujourdhui` en paramètre explicite : elle a déjà la forme qu'exige le recalcul.
+
+Pas de colonne de score « à titre historique » non plus. **Une colonne que rien
+ne lit est de la donnée morte, et `tools/symboles_morts.py` ne voit pas les
+colonnes.** Le seuil où ce choix se rediscuterait est de l'ordre de quelques
+centaines de milliers de lignes — la France entière sur dix ans — et la réponse
+serait alors une colonne matérialisée avec un job de recalcul, pas un score
+gelé à la collecte.
+
+**On stocke aussi les annonces écartées.** Sans elles, `ecartes` devient un
+nombre figé qu'on ne peut plus recalculer ni justifier. Les seules qui restent
+invisibles sont celles sans cédant : `construire_annonce` rend `None`, il n'y a
+même pas d'`id`. Elles ne peuvent être que **comptées**.
+
+**`montant_min` disparaît de la collecte.** Le job ramasse tout ; le seuil
+devient un filtre de lecture. Sinon le relever imposerait une recollecte.
+
+**Ré-enrichissement : 30 jours pour les actives, jamais pour les cessées.** Une
+société ne redevient pas active. Cette phrase est une affirmation tant qu'un
+test ne la prouve pas — il en faut un.
+
+**`evenement_revision` est conservée.** Un rectificatif BODACC est
+indistinguable d'une régression de notre parser si on écrase, et on n'aurait
+aucun moyen de savoir lequel des deux vient de se produire. C'est la seule
+trace qui permette de trancher.
+
+**Le périmètre reste PACA, mais le job prend la liste de départements en
+paramètre.** Le coût est nul et l'élargissement débloquera le critère
+département, laissé à poids nul avec la mention « prêt à servir si le périmètre
+s'élargit ».
+
+### L'asymétrie de population entre les deux surfaces — écrite exprès
+
+**Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc
+pas la même population.** Le choix est délibéré : le chemin direct se démontre
+bien en entretien, et le basculer sur la base sera un changement d'une ligne
+dans `mcp_server`. Mais une asymétrie tue devient un bug ; écrite, elle reste
+un choix.
+
+Ce qui les sépare, et ce qui ne les sépare pas :
+
+| | MCP en direct | API sur base |
+|---|---|---|
+| Scoring | `evaluer`, même grille | `evaluer`, même grille |
+| Provenance | `provenance.serialiser` | `provenance.serialiser` |
+| Motifs de refus | `motif_ecart` | `motif_ecart` |
+| Annonces rapatriées | plafond 600 | tout |
+| Candidats enrichis | `2 × limite`, plafond 200 | tous |
+| Fenêtre | celle de la requête | celle de la dernière collecte |
+
+**Aucune divergence de jugement, une divergence de population.** Mesuré le
+2026-08-17 sur le 06, six mois, > 300 k€ : 668 annonces publiées, 600
+rapatriées, 460 exploitables, 116 candidats — dont **50 enrichis** à
+`limite=25`. Sur cette recherche-là, le MCP juge donc au mieux 50 des 116
+candidats, là où la base les portera tous.
+
+C'est exactement la leçon « un tri en amont est un filtre », mais installée
+cette fois **entre deux surfaces** au lieu d'être à l'intérieur d'une seule.
+Elle est acceptable tant qu'elle est déclarée. Le jour où quelqu'un comparera
+un résultat MCP et un résultat web sans savoir ça, il conclura à un bug de
+scoring et cherchera au mauvais endroit.
 
 ## Si le temps manque
 
