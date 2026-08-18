@@ -336,3 +336,130 @@ def test_rouvrir_une_base_existante_ne_la_recree_pas(tmp_path: Path) -> None:
     seconde = entrepot.ouvrir(chemin)
     assert seconde.execute("SELECT count(*) FROM evenement").fetchone()[0] == 1
     seconde.close()
+
+
+# --- Palier 2 : l'aller-retour ------------------------------------------------
+#
+# Le corpus est choisi pour que les grandeurs proches DIFFERENT. Un jeu ou
+# toutes les lignes se ressemblent rend le test vert quelle que soit la valeur
+# qu'on lui donne — deux fois deja sur ce projet : `annonces_exploitables` sur
+# un corpus tout-candidat, `premiere_collecte` sur deux collectes le meme jour.
+
+
+def corpus_contraste() -> list[Lead]:
+    """Six lignes ou chaque paire de grandeurs proches se separe.
+
+    | ce qui varie          | valeurs presentes                  |
+    |-----------------------|------------------------------------|
+    | segment du cedant     | `pm` et `pp`                       |
+    | statut                | active, cessee, inconnu            |
+    | date d'acte           | presente et absente                |
+    | qualification         | retenue (`achat`) et ecartee       |
+    | SIREN                 | present et absent                  |
+    | montant               | de part et d'autre du seuil teste  |
+    """
+    return [
+        fabriquer_lead(identifiant="PM-ACTIVE", montant=400_000.0),
+        fabriquer_lead(
+            identifiant="PP-ACTIVE",
+            type_cedant=TypeCedant.PERSONNE_PHYSIQUE,
+            siren="404833048",
+            montant=350_000.0,
+        ),
+        fabriquer_lead(identifiant="PM-CESSEE", statut=StatutEntreprise.CESSEE, siren="552081317"),
+        fabriquer_lead(identifiant="SANS-SIREN", siren=None, montant=500_000.0),
+        fabriquer_lead(identifiant="PETITE", montant=20_000.0),
+        fabriquer_lead(identifiant="APPORT", montant=900_000.0),
+    ]
+
+
+@pytest.fixture
+def base_contrastee(base: sqlite3.Connection) -> sqlite3.Connection:
+    for lead in corpus_contraste():
+        if lead.event.id == "APPORT":
+            lead = _en_apport(lead)
+        if lead.event.id == "SANS-SIREN":
+            lead = _sans_date_acte(lead)
+        entrepot.enregistrer(base, lead)
+    return base
+
+
+def _remplacer_event(lead: Lead, **champs: object) -> Lead:
+    return prov.assembler(
+        lead.event.model_copy(update=champs),
+        lead.evaluation,
+        date_collecte=lead.provenance.date_collecte,
+    )
+
+
+def _en_apport(lead: Lead) -> Lead:
+    return _remplacer_event(lead, qualification="apport", retenu=False)
+
+
+def _sans_date_acte(lead: Lead) -> Lead:
+    return _remplacer_event(lead, date_acte=None)
+
+
+def test_l_aller_retour_conserve_chaque_fait(base_contrastee: sqlite3.Connection) -> None:
+    """Ce que la base rend doit etre ce qu'on lui a donne, champ par champ.
+
+    Les six lignes different deux a deux sur chaque grandeur : une permutation
+    de deux colonnes de meme type — les deux dates, les deux textes du cedant —
+    change donc au moins une valeur, au lieu de passer inapercue.
+    """
+    stockes = {s.event.id: s for s in entrepot.evenements(base_contrastee)}
+    assert len(stockes) == 6
+
+    pm = stockes["PM-ACTIVE"].event
+    assert pm.cedant_type is TypeCedant.PERSONNE_MORALE
+    assert pm.statut_cedant is StatutEntreprise.ACTIVE
+    assert pm.date_acte == date(2026, 7, 25)
+    assert pm.date_parution == date(2026, 8, 13)
+    assert pm.montant_eur == 400_000.0
+    assert pm.retenu is True
+    assert pm.url_publication == URL
+
+    pp = stockes["PP-ACTIVE"].event
+    assert pp.cedant_type is TypeCedant.PERSONNE_PHYSIQUE, "le segment doit survivre"
+    assert pp.cedant_siren == "404833048"
+
+    assert stockes["PM-CESSEE"].event.statut_cedant is StatutEntreprise.CESSEE
+    assert stockes["APPORT"].event.retenu is False
+    assert stockes["APPORT"].event.qualification == "apport"
+    assert stockes["SANS-SIREN"].event.date_acte is None, "l'absence de date doit survivre"
+
+
+def test_un_cedant_sans_siren_retombe_sur_inconnu(base_contrastee: sqlite3.Connection) -> None:
+    """Regle de degradation de la Phase 3 : un lead sans enrichissement reste un
+    lead valide, avec son motif. Elle doit survivre au passage par la base — ici
+    la jointure sur `cedant` ne rend rien."""
+    sans = next(
+        s for s in entrepot.evenements(base_contrastee) if s.event.id == "SANS-SIREN"
+    )
+    assert sans.event.statut_cedant is StatutEntreprise.INCONNU
+    assert sans.event.motif_enrichissement == "enrichissement non effectue"
+
+
+def test_la_date_de_collecte_vient_de_la_base_pas_de_l_horloge(
+    base: sqlite3.Connection,
+) -> None:
+    """Une provenance qui annoncerait la date du jour pretendrait qu'on vient
+    de consulter le BODACC, alors qu'on relit une ligne vieille d'une semaine.
+    La contrainte 3 demande une date de COLLECTE, pas une date de lecture."""
+    entrepot.enregistrer(base, fabriquer_lead(date_collecte=date(2026, 8, 16)))
+    stocke = entrepot.evenements(base)[0]
+    assert stocke.date_collecte == date(2026, 8, 16)
+    assert stocke.date_collecte != date.today()
+
+
+def test_la_lecture_filtre_par_departement(base_contrastee: sqlite3.Connection) -> None:
+    assert entrepot.evenements(base_contrastee, departements=["13"]) != []
+    assert entrepot.evenements(base_contrastee, departements=["06"]) == []
+
+
+def test_la_lecture_ne_filtre_pas_sur_le_montant(base_contrastee: sqlite3.Connection) -> None:
+    """Le seuil est un critere commercial : il appartient au classement, et il
+    porte un motif de refus qui doit etre compte. Le sortir en SQL ferait
+    disparaitre les ecartes du decompte — « un tri en amont est un filtre »."""
+    ids = {s.event.id for s in entrepot.evenements(base_contrastee)}
+    assert "PETITE" in ids, "la base rend tout, c'est le classement qui tranche"

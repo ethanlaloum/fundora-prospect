@@ -1126,6 +1126,57 @@ premier passage avait révélés :
   une garantie qui n'existe que sur le papier, et rien ne la distingue d'une
   garantie réelle à la lecture du schéma.
 
+### Palier 2 ✅ — la lecture, et la preuve que rien n'est figé
+
+`entrepot.evenements` rend des faits (`EvenementStocke` : le fait **et** la date
+à laquelle il a été constaté). `pipeline.lire` les classe. Le stockage ne score
+rien, le cœur ne connaît pas SQLite.
+
+**Le test du palier :** deux lectures de la même ligne, à six mois d'écart,
+rendent deux scores — le plus tardif étant le plus faible. Sans lui, « le score
+est recalculé à la lecture » reste une intention : rien ne distingue un recalcul
+d'une valeur figée tant qu'on ne lit qu'une fois. Un second test précise que
+c'est bien la **fraîcheur** qui bouge et le montant qui ne bouge pas.
+
+**`date_collecte` vient de la base, jamais de l'horloge du lecteur.** Une
+provenance datée du jour de lecture prétendrait qu'on vient de consulter le
+BODACC alors qu'on relit une ligne vieille d'une semaine. D'où le paramètre
+`date_collecte_de` de `classer` : à la collecte c'est le jour même, en lecture
+c'est la base. Le coder en dur était la mutation la plus tentante, et elle est
+attrapée.
+
+**Deux étapes de plus sont descendues dans le partagé**, parce qu'elles
+existaient en double dès qu'une seconde surface lisait :
+
+- `motif_ecart_faits` ne prend plus un type porteur mais **des faits**. Une
+  `Annonce` fraîche et un `LiquidityEvent` relu portent les mêmes faits sous
+  deux types : deux fonctions les auraient traités séparément et auraient fini
+  par diverger sur un mot. Un test compare les deux chemins sur le produit
+  cartésien des cinq qualifications et de trois seuils — **seule leur
+  comparaison** voit ce genre d'écart, aucun test d'un chemin isolé ne le peut.
+- `classer` porte le scoring, la porte du statut, la provenance, le tri et la
+  troncature. `executer` et `lire` l'appellent tous les deux.
+
+**`resumer` reste la seule rédaction du projet.** Les deux sources n'ont pas la
+même population — en direct la grille ne voit que les dossiers *enrichis*, en
+base elle voit tous les *candidats* — donc le référent change dans la phrase.
+Les fragments diffèrent, l'assemblage est unique. Et quand les compteurs de
+collecte manquent, le résumé le **dit** au lieu d'inventer un total : « l'étendue
+de la collecte n'est pas connue ». Une base ne sait pas, par elle-même, ce
+qu'elle n'a pas reçu.
+
+**Le montant n'est pas filtré en SQL.** Le sortir en `WHERE` ferait disparaître
+les écartés du décompte — « un tri en amont est un filtre », appliqué cette fois
+à une clause. Un test le verrouille, et la mutation correspondante est attrapée.
+
+Corpus de l'aller-retour choisi pour que **chaque paire de grandeurs proches se
+sépare** : cédant `pm` et `pp`, statut actif / cessé / inconnu, date d'acte
+présente et absente, événement retenu et écarté, SIREN présent et absent,
+montants de part et d'autre du seuil. Deux corpus dégénérés ont déjà coûté deux
+tests aveugles sur ce projet.
+
+Quatorze mutations, **zéro survivante**.
+
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
 **Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc

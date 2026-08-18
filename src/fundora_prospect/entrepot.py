@@ -52,9 +52,17 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
-from fundora_prospect.models import Lead
+from fundora_prospect.models import (
+    Lead,
+    LiquidityEvent,
+    StatutEntreprise,
+    TypeCedant,
+)
 
 VARIABLE_BASE = "FUNDORA_DB"
 
@@ -251,3 +259,101 @@ def enregistrer(connexion: sqlite3.Connection, lead: Lead) -> None:
                 collecte,
             ),
         )
+
+
+# --- Lecture -------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EvenementStocke:
+    """Un fait relu, ET la date a laquelle il a ete constate.
+
+    Les deux voyagent ensemble parce que la seconde ne se deduit pas de la
+    premiere. `date_collecte` vient de la BASE, jamais de l'horloge du lecteur :
+    une provenance qui annoncerait la date du jour pretendrait qu'on vient de
+    consulter le BODACC alors qu'on relit une ligne vieille d'une semaine. La
+    contrainte 3 demande une date de collecte, pas une date de lecture.
+    """
+
+    event: LiquidityEvent
+    date_collecte: date
+
+
+def _en_evenement(ligne: sqlite3.Row) -> LiquidityEvent:
+    """Reconstruit le fait. L'enrichissement est joint depuis `cedant`.
+
+    Un cedant sans SIREN, ou dont la societe n'a jamais ete enrichie, retombe
+    sur `INCONNU` avec son motif : c'est la regle de degradation de la Phase 3,
+    et elle doit survivre au passage par la base — un lead sans enrichissement
+    reste un lead valide.
+    """
+    statut = ligne["statut"]
+    return LiquidityEvent(
+        id=ligne["id"],
+        date_parution=date.fromisoformat(ligne["date_parution"]),
+        date_acte=date.fromisoformat(ligne["date_acte"]) if ligne["date_acte"] else None,
+        departement=ligne["departement"],
+        url_publication=ligne["url_publication"],
+        montant_eur=ligne["montant_eur"],
+        devise=ligne["devise"],
+        qualification=ligne["qualification"],
+        retenu=bool(ligne["retenu"]),
+        aberrant=bool(ligne["aberrant"]),
+        cedant_denomination=ligne["cedant_denomination"],
+        cedant_type=TypeCedant(ligne["cedant_type"]),
+        cedant_siren=ligne["cedant_siren"],
+        cedant_indivision=bool(ligne["cedant_indivision"]),
+        code_ape=ligne["code_ape"],
+        section_ape=ligne["section_ape"],
+        statut_cedant=StatutEntreprise(statut) if statut else StatutEntreprise.INCONNU,
+        motif_enrichissement=ligne["motif_enrichissement"] or "enrichissement non effectue",
+    )
+
+
+def evenements(
+    connexion: sqlite3.Connection,
+    *,
+    departements: Sequence[str] | None = None,
+    depuis: date | None = None,
+    jusqu_a: date | None = None,
+) -> list[EvenementStocke]:
+    """Les faits stockes, sans jugement.
+
+    Ce module ne filtre que sur ce qui est indexe — departement et periode de
+    parution. **Il ne filtre PAS sur le montant** : ce seuil est un critere
+    commercial, il appartient au classement et il porte un motif de refus qui
+    doit etre compte comme les autres. Le sortir en SQL ferait disparaitre les
+    ecartes du decompte, ce qui est exactement le defaut « un tri en amont est
+    un filtre ».
+
+    Aucun tri non plus : l'ordre du classement depend du score, donc de la date
+    de lecture. Trier ici serait un pre-classement, et un pre-classement qui
+    n'obeit pas aux regles du classement final est un filtre deguise.
+    """
+    clauses: list[str] = []
+    parametres: list[object] = []
+    if departements:
+        clauses.append(f"e.departement IN ({', '.join('?' * len(departements))})")
+        parametres.extend(departements)
+    if depuis is not None:
+        clauses.append("e.date_parution >= ?")
+        parametres.append(depuis.isoformat())
+    if jusqu_a is not None:
+        clauses.append("e.date_parution <= ?")
+        parametres.append(jusqu_a.isoformat())
+
+    ou = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    lignes = connexion.execute(
+        "SELECT e.*, c.statut, c.code_ape, c.section_ape, "
+        "       c.motif AS motif_enrichissement "
+        "FROM evenement e LEFT JOIN cedant c ON c.siren = e.cedant_siren" + ou,
+        parametres,
+    ).fetchall()
+
+    return [
+        EvenementStocke(
+            event=_en_evenement(ligne),
+            date_collecte=date.fromisoformat(ligne["date_collecte"]),
+        )
+        for ligne in lignes
+    ]

@@ -40,7 +40,7 @@ descendu ici : un formulaire web ecrit « PACA » exactement comme un modele.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -154,39 +154,69 @@ def resumer(stats: dict[str, Any]) -> str:
     porte le sens des compteurs. Une seconde surface qui ecrirait la sienne
     rouvrirait, mot pour mot, le defaut que ces compteurs ont mis trois phases
     a fermer.
+
+    **Deux sources, une seule phrase.** La recherche en direct connait ce que le
+    BODACC a publie ; la lecture en base connait ce qu'elle a stocke. Les deux
+    populations n'ont pas le meme nom, donc pas la meme condition d'obtention —
+    et c'est precisement pour ca qu'elles ne doivent pas etre redigees a deux
+    endroits. Les fragments changent, l'assemblage est unique.
     """
-    morceaux = [f"{stats['annonces_publiees']} annonces publiees"]
+    en_direct = "annonces_publiees" in stats
+    morceaux: list[str] = []
+    reserves: list[str] = []
+
+    # --- Ce que la source contenait
+    #
     # Les reserves n'apparaissent que quand elles mordent : une mise en garde
     # affichee en permanence cesse d'etre lue.
-    if stats["plafond_atteint"]:
-        morceaux.append(
-            f"{stats['annonces_rapatriees']} rapatriees seulement "
-            "(plafond de rapatriement atteint)"
+    if en_direct:
+        morceaux.append(f"{stats['annonces_publiees']} annonces publiees")
+        if stats["plafond_atteint"]:
+            morceaux.append(
+                f"{stats['annonces_rapatriees']} rapatriees seulement "
+                "(plafond de rapatriement atteint)"
+            )
+        if stats["sans_cedant_ou_illisibles"]:
+            morceaux.append(f"{stats['sans_cedant_ou_illisibles']} sans cedant ou illisibles")
+        morceaux.append(f"{stats['annonces_exploitables']} exploitables")
+    else:
+        morceaux.append(f"{stats['evenements_en_base']} evenements en base")
+        # Une base ne sait pas, par elle-meme, ce qu'elle n'a pas recu. Le dire
+        # est la seule facon de ne pas faire passer un stock pour un total.
+        reserves.append(
+            "l'etendue de la collecte n'est pas connue : aucun compteur de "
+            "collecte enregistre pour cette recherche"
         )
-    if stats["sans_cedant_ou_illisibles"]:
-        morceaux.append(f"{stats['sans_cedant_ou_illisibles']} sans cedant ou illisibles")
-    morceaux += [
-        f"{stats['annonces_exploitables']} exploitables",
-        # Le chiffre porte sa condition d'obtention DANS la meme phrase : il ne
-        # decrit que les dossiers enrichis, pas la population exploitable.
-        f"{stats['classables_parmi_les_enrichis']} classables "
-        f"parmi les {stats['enrichis']} enrichis",
-    ]
+
+    # --- Ce que la grille en a fait
+    #
+    # Le chiffre porte sa condition d'obtention DANS la meme phrase. Elle n'est
+    # pas la meme des deux cotes : en direct la grille ne voit que les dossiers
+    # ENRICHIS, en base elle voit tous les CANDIDATS.
+    if en_direct:
+        classables = stats["classables_parmi_les_enrichis"]
+        morceaux.append(f"{classables} classables parmi les {stats['enrichis']} enrichis")
+        portee = f"classables parmi les {stats['enrichis']} enrichis"
+    else:
+        classables = stats["classables"]
+        morceaux.append(f"{classables} classables sur {stats['candidats']} candidats")
+        portee = f"classables sur {stats['candidats']} candidats"
+
     morceaux += [f"{n} {motif}" for motif, n in stats["ecartes"].items()]
     resume = ", ".join(morceaux) + "."
 
-    reserves = []
-    if stats["leads_rendus"] < stats["classables_parmi_les_enrichis"]:
-        reserves.append(
-            f"{stats['leads_rendus']} rendus sur "
-            f"{stats['classables_parmi_les_enrichis']} classables parmi les "
-            f"{stats['enrichis']} enrichis (limite atteinte)"
+    # --- Ce qui a ete tronque, jamais confondu avec un refus
+    if stats["leads_rendus"] < classables:
+        reserves.insert(
+            0,
+            f"{stats['leads_rendus']} rendus sur {classables} {portee} (limite atteinte)",
         )
-    if stats["candidats_non_enrichis"]:
-        reserves.append(
+    if stats.get("candidats_non_enrichis"):
+        reserves.insert(
+            1,
             f"{stats['candidats_non_enrichis']} candidats non enrichis donc non "
             "classes, faute de budget d'appels : relancer avec une limite plus "
-            "haute pour les voir"
+            "haute pour les voir",
         )
     if reserves:
         resume += " " + " ; ".join(reserves) + "."
@@ -211,24 +241,59 @@ def resumer(stats: dict[str, Any]) -> str:
 # `tests/test_pipeline.py`, ecrit en meme temps que cette section.
 
 
-def motif_ecart(annonce: Annonce, montant_min: float = 0.0) -> str | None:
-    """Le motif pour lequel cette annonce n'est pas un candidat, ou None.
+def motif_ecart_faits(
+    *,
+    retenu: bool,
+    aberrant: bool,
+    qualification: str,
+    montant: float | None,
+    montant_min: float = 0.0,
+) -> str | None:
+    """**Le seul endroit ou un motif de refus se decide.**
+
+    Ne prend que des faits, pas un type porteur : le meme refus doit se nommer
+    identiquement qu'on parte d'une `Annonce` fraiche du BODACC ou d'un
+    `LiquidityEvent` relu en base. Ce sont deux types differents portant les
+    memes faits, et deux fonctions qui les traiteraient separement finiraient
+    par diverger sur un mot.
 
     L'ordre des tests est significatif : le premier motif rencontre est celui
     qui sera compte. Il va de la qualite de la donnee vers le critere
     commercial, du plus structurel au plus reglable.
     """
-    prix = annonce.prix
-    if not prix.retenu:
-        return str(prix.qualification).replace("_", " ")
-    if prix.aberrant:
+    if not retenu:
+        return str(qualification).replace("_", " ")
+    if aberrant:
         return "montant aberrant"
-    if (prix.montant or 0) < montant_min:
+    if (montant or 0) < montant_min:
         # Seul motif de ce bloc qui depende d'un parametre et non du fait.
-        # Le job de collecte appellera donc avec `montant_min=0` : le seuil est
+        # Le job de collecte appelle donc avec `montant_min=0` : le seuil est
         # un filtre de LECTURE, sinon le relever imposerait une recollecte.
         return "sous le montant minimum"
     return None
+
+
+def motif_ecart(annonce: Annonce, montant_min: float = 0.0) -> str | None:
+    """Adaptateur cote collecte : une `Annonce` fraiche du BODACC."""
+    prix = annonce.prix
+    return motif_ecart_faits(
+        retenu=prix.retenu,
+        aberrant=prix.aberrant,
+        qualification=str(prix.qualification),
+        montant=prix.montant,
+        montant_min=montant_min,
+    )
+
+
+def motif_ecart_evenement(event: LiquidityEvent, montant_min: float = 0.0) -> str | None:
+    """Adaptateur cote lecture : un `LiquidityEvent` relu en base."""
+    return motif_ecart_faits(
+        retenu=event.retenu,
+        aberrant=event.aberrant,
+        qualification=event.qualification,
+        montant=event.montant_eur,
+        montant_min=montant_min,
+    )
 
 
 def repartir(
@@ -249,6 +314,65 @@ def repartir(
         else:
             ecartes[motif] = ecartes.get(motif, 0) + 1
     return candidats, ecartes
+
+
+# --- Classement : l'etape partagee par la recherche et la lecture --------------
+
+
+def classer(
+    evenements: Iterable[LiquidityEvent],
+    *,
+    grille: GrillePonderation,
+    aujourdhui: date,
+    limite: int,
+    ecartes: dict[str, int],
+    date_collecte_de: Callable[[LiquidityEvent], date],
+) -> tuple[list[dict[str, Any]], int]:
+    """Score, filtre sur le statut, trace, trie, tronque. Rend les leads rendus
+    et le nombre de classables **avant** la coupe.
+
+    Partage par les deux consommateurs, pour la meme raison que `motif_ecart` :
+    ce qui divergerait n'est pas la boucle, ce sont les motifs de refus du
+    statut, l'ordre de tri, et le fait que la sortie passe par
+    `provenance.serialiser`. Trois choses qu'une seconde implementation
+    retrouverait « presque » identiques.
+
+    `date_collecte_de` n'est pas une commodite. A la collecte, la date de
+    collecte est le jour meme ; en lecture, elle vient de la base. Coder
+    `aujourdhui` en dur ici ferait mentir la provenance de tout lead relu — il
+    annoncerait une consultation du BODACC qui n'a pas eu lieu.
+    """
+
+    def ecarter(motif: str) -> None:
+        ecartes[motif] = ecartes.get(motif, 0) + 1
+
+    leads: list[dict[str, Any]] = []
+    for event in evenements:
+        evaluation = evaluer(event, grille, aujourdhui=aujourdhui)
+        if not evaluation.classable:
+            if event.statut_cedant is StatutEntreprise.CESSEE:
+                ecarter("societe cedante cessee")
+            elif event.statut_cedant is StatutEntreprise.NON_DIFFUSIBLE:
+                ecarter("entreprise non diffusible INSEE")
+            else:
+                ecarter("non classable")
+            continue
+
+        # Porte unique de sortie : `assembler` leve si la provenance est
+        # incomplete (contrainte 3). Un lead intracable sort du flux avec son
+        # motif, comme n'importe quel autre refus — il n'est ni rendu sans
+        # provenance, ni perdu en silence.
+        try:
+            lead = provenance.assembler(
+                event, evaluation, date_collecte=date_collecte_de(event)
+            )
+        except ValidationError:
+            ecarter("provenance incomplete")
+            continue
+        leads.append(provenance.serialiser(lead))
+
+    leads.sort(key=lambda lead: lead["score"], reverse=True)
+    return leads[:limite], len(leads)
 
 
 # --- Le pipeline ---------------------------------------------------------------
@@ -305,9 +429,6 @@ def executer(
     # 1. Filtrage sans appel reseau : inutile d'enrichir ce qu'on jettera.
     candidats, ecartes = repartir(annonces, montant_min=montant_min)
 
-    def ecarter(motif: str) -> None:
-        ecartes[motif] = ecartes.get(motif, 0) + 1
-
     # 2. Pre-classement sans enrichissement, pour n'enrichir que le haut du
     #    panier : l'enrichissement coute un appel API par lead.
     #
@@ -326,32 +447,21 @@ def executer(
     candidats.sort(key=score_provisoire, reverse=True)
     a_enrichir = candidats[: min(limite * CANDIDATS_PAR_LEAD, PLAFOND_ENRICHISSEMENTS)]
 
-    leads: list[dict[str, Any]] = []
-    for annonce in a_enrichir:
-        enrichissement = enrichir(annonce.cedant.siren)
-        event = LiquidityEvent.depuis_annonce(annonce, enrichissement)
-        evaluation = evaluer(event, grille, aujourdhui=aujourdhui)
-        if not evaluation.classable:
-            if event.statut_cedant is StatutEntreprise.CESSEE:
-                ecarter("societe cedante cessee")
-            elif event.statut_cedant is StatutEntreprise.NON_DIFFUSIBLE:
-                ecarter("entreprise non diffusible INSEE")
-            else:
-                ecarter("non classable")
-            continue
-
-        # Porte unique de sortie : `assembler` leve si la provenance est
-        # incomplete (contrainte 3). Un lead intracable sort du flux avec son
-        # motif, comme n'importe quel autre refus — il n'est ni rendu sans
-        # provenance, ni perdu en silence.
-        try:
-            lead = provenance.assembler(event, evaluation, date_collecte=aujourdhui)
-        except ValidationError:
-            ecarter("provenance incomplete")
-            continue
-        leads.append(provenance.serialiser(lead))
-
-    leads.sort(key=lambda lead: lead["score"], reverse=True)
+    evenements = (
+        LiquidityEvent.depuis_annonce(annonce, enrichir(annonce.cedant.siren))
+        for annonce in a_enrichir
+    )
+    leads, classables = classer(
+        evenements,
+        grille=grille,
+        aujourdhui=aujourdhui,
+        limite=limite,
+        ecartes=ecartes,
+        # A la collecte, la date de collecte EST aujourd'hui : on vient
+        # d'interroger le BODACC. En lecture ce n'est plus vrai, d'ou le
+        # parametre.
+        date_collecte_de=lambda _: aujourdhui,
+    )
 
     # Ce compteur se prend AVANT la coupe finale — sinon une troncature se lit
     # comme un jugement de la grille : sur 115 candidats, « 25 classables » se
@@ -366,8 +476,7 @@ def executer(
     # `classables_parmi_les_enrichis` : le nom porte sa condition d'obtention.
     # Sans elle, « classables » promet un jugement sur toute la population alors
     # qu'il compte ce que la grille a eu le DROIT de regarder.
-    classables_parmi_les_enrichis = len(leads)
-    leads = leads[:limite]
+    classables_parmi_les_enrichis = classables
 
     statistiques = {
         # Trois populations, trois noms. `annonces_examinees` les confondait :
@@ -432,3 +541,84 @@ def evaluer_hypothese(
         statut_cedant=statut_cedant,
     )
     return evaluer(event, GrillePonderation.defaut(), aujourdhui=aujourdhui)
+
+
+# --- La lecture ----------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ResultatLecture:
+    """Ce que la base contenait, ET ce que le classement en a fait.
+
+    Meme principe que `ResultatPipeline` et `ResultatRecherche` : ne rendre que
+    la liste obligerait le lecteur a presenter un sous-ensemble comme un total.
+    """
+
+    leads: list[dict[str, Any]]
+    statistiques: dict[str, Any]
+    montant_min: float
+
+
+def lire(
+    evenements: Sequence[Any],
+    *,
+    montant_min: float = 0.0,
+    limite: int = LIMITE_DEFAUT,
+    aujourdhui: date | None = None,
+    grille: GrillePonderation | None = None,
+    collecte: dict[str, Any] | None = None,
+) -> ResultatLecture:
+    """Classe des faits deja stockes. **Aucun appel reseau.**
+
+    `evenements` sont des `entrepot.EvenementStocke` : un fait, et la date a
+    laquelle il a ete constate. Ils arrivent en parametre plutot que par un
+    import, comme `rechercher` et `enrichir` dans `executer` — le coeur ne
+    connait pas SQLite.
+
+    **Le score est recalcule ici, a chaque lecture.** La fraicheur decroit des
+    le premier jour : deux lectures a deux dates rendent deux scores, et c'est
+    la propriete qui justifie de ne rien figer en base.
+
+    `collecte` porte, quand il est connu, ce que la source contenait — les
+    compteurs ecrits par le job. Absent, le resume le dit au lieu d'inventer un
+    total : une base ne sait pas, par elle-meme, ce qu'elle n'a pas recu.
+    """
+    aujourdhui = aujourdhui or date.today()
+    grille = grille or GrillePonderation.defaut()
+
+    # Meme fonction de vocabulaire qu'a la collecte : `motif_ecart_faits` via
+    # son adaptateur. Un second endroit qui nommerait « sous le montant
+    # minimum » autrement casserait tout comptage agregeant les deux sources.
+    candidats: list[Any] = []
+    ecartes: dict[str, int] = {}
+    for stocke in evenements:
+        motif = motif_ecart_evenement(stocke.event, montant_min)
+        if motif is None:
+            candidats.append(stocke)
+        else:
+            ecartes[motif] = ecartes.get(motif, 0) + 1
+
+    dates = {stocke.event.id: stocke.date_collecte for stocke in candidats}
+    leads, classables = classer(
+        (stocke.event for stocke in candidats),
+        grille=grille,
+        aujourdhui=aujourdhui,
+        limite=limite,
+        ecartes=ecartes,
+        # La provenance date de la COLLECTE, pas de la lecture.
+        date_collecte_de=lambda event: dates[event.id],
+    )
+
+    statistiques: dict[str, Any] = {
+        "evenements_en_base": len(evenements),
+        "candidats": len(candidats),
+        "classables": classables,
+        "leads_rendus": len(leads),
+        "ecartes": ecartes,
+    }
+    if collecte:
+        statistiques.update(collecte)
+
+    return ResultatLecture(
+        leads=leads, statistiques=statistiques, montant_min=montant_min
+    )
