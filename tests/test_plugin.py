@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from fundora_prospect import mcp_server
+from fundora_prospect import pipeline
 
 RACINE = Path(__file__).resolve().parents[1]
 
@@ -166,11 +166,11 @@ def test_l_exemple_de_la_competence_est_le_vrai_format_de_sortie() -> None:
     donc la derive a survecu aux deux corrections — quatrieme occurrence du
     mecanisme « un chiffre survit au changement de sa source ».
 
-    Le test REGENERE l'exemple depuis `_resume` et exige l'egalite. Recopier a
-    la main rouvrirait la meme porte : c'est la source qui doit produire
-    l'exemple, pas la bonne volonte du relecteur.
+    Le test REGENERE l'exemple depuis `pipeline.resumer` et exige l'egalite.
+    Recopier a la main rouvrirait la meme porte : c'est la source qui doit
+    produire l'exemple, pas la bonne volonte du relecteur.
     """
-    attendu = mcp_server._resume(dict(_STATS_DE_REFERENCE))
+    attendu = pipeline.resumer(dict(_STATS_DE_REFERENCE))
     texte = (RACINE / "skills" / "scan-liquidity-events" / "SKILL.md").read_text(encoding="utf-8")
 
     # L'exemple est une citation markdown : on la reconstitue en une ligne.
@@ -183,7 +183,7 @@ def test_l_exemple_de_la_competence_est_le_vrai_format_de_sortie() -> None:
     assert citation == attendu, (
         "l'exemple de SKILL.md a derive du format reel.\n"
         f"  dans SKILL.md : {citation}\n"
-        f"  produit par _resume : {attendu}"
+        f"  produit par pipeline.resumer : {attendu}"
     )
 
 
