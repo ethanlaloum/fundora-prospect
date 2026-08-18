@@ -550,6 +550,94 @@ Deux règles apprises en écrivant l'outil :
   qui crie au loup est désactivé dans la semaine.** Le biais va donc vers le
   silence — il peut manquer un mort, il ne doit pas en inventer.
 
+### Leçon générale : vérifier qu'une chose existe n'est pas vérifier ce qu'elle dit
+
+Découvert en Phase 6 en extrayant `motif_ecart`. Avant d'écrire la moindre
+ligne, une mutation pour s'assurer que les tests couvraient le code déplacé :
+remplacer le motif de refus par la chaîne `"ecarte"`.
+
+**Les 436 tests sont restés verts.**
+
+Les tests existants vérifiaient `assert stats["ecartes"]` et
+`assert sum(stats["ecartes"].values()) > 0`. La structure était là, non vide,
+et son contenu n'était lu par personne. Un motif écrit « apport en nature »
+d'un côté et « apport » de l'autre aurait cassé tout comptage agrégeant les
+deux sources sans qu'aucun test ne rougisse.
+
+#### C'est le quatrième visage du même mécanisme
+
+| Ce qu'on vérifiait | Ce qu'on croyait vérifier | Pourquoi c'était aveugle |
+|---|---|---|
+| **Le symbole est défini** (`Lead`, `Provenance`) | qu'il fonctionne | un test ne peut pas échouer sur du code qu'il n'appelle pas |
+| **Le compteur a une valeur** (`annonces_examinees`) | qu'il décrit sa population | il décrivait un budget, sous un nom qui promet un total |
+| **L'exemple est présent** (`SKILL.md`) | qu'il est à jour | la valeur avait survécu au changement de sa source |
+| **La structure est non vide** (`ecartes`) | qu'elle dit la bonne chose | la présence et le contenu sont deux propriétés distinctes |
+
+Le mécanisme commun : **ce qui est facile à vérifier se substitue à ce qui
+compte.** Présence, nom, non-vacuité, existence — quatre propriétés bon marché
+qui se laissent tester en une ligne, et qui passent toutes pour des raisons
+sans rapport avec ce qu'on voulait garantir. Le test est vert, la propriété
+n'est pas gardée, et personne ne le sait parce que le vert est indistinguable
+du vert.
+
+#### La règle et sa technique
+
+**Toute assertion de présence doit être doublée d'une assertion de contenu.**
+`assert charge["breakdown"]` ne vaut rien seul ; il faut dire ce que le
+breakdown doit contenir.
+
+**Et la seconde se vérifie par MUTATION DE CONTENU** — remplacer la valeur par
+une autre valeur non vide et de même type. Pas par une valeur absente : mettre
+`None` ou `""` fait rougir l'assertion de présence et donne l'illusion d'une
+couverture. C'est précisément la différence entre les deux propriétés.
+
+#### Balayage systématique, Phase 6
+
+Douze mutations de contenu passées sur toute la suite, aucune ne touchant à la
+présence d'une structure. Résultat : **cinq survivantes, dont quatre vrais
+trous.**
+
+| Mutation | Résultat |
+|---|---|
+| `breakdown` : le motif d'un critère porte le nom du critère | **trou — contrainte 5** |
+| le motif du critère montant devient « contribution calculée » | **trou — contrainte 5** |
+| le motif de la fraîcheur perd le nombre de jours | **trou — contrainte 5** |
+| `annonces_exploitables` compte les candidats | **trou** |
+| `base_legale` : le repli `INCONNU` rend le texte B2B | survit — code inatteignable |
+| `SOURCE` nomme une autre origine | détectée |
+| `enrichis` compte les candidats | détectée |
+| `date_collecte` ignore la date passée | détectée |
+| `siren` rend la dénomination | détectée |
+| `statut_motif` porte le statut | détectée |
+| le résumé perd le libellé du motif | détectée |
+
+**Trois des quatre trous portent sur la contrainte 5**, et tous viennent du
+même test : `assert contribution.motif.strip()`. Il vérifie qu'un motif existe.
+Or la contrainte ne demande pas qu'un motif existe, elle demande que **le
+détail du calcul** soit là — de quoi refaire l'opération. Un motif générique et
+non vide la viole tout en passant le test. Les nouveaux tests exigent donc les
+nombres qui permettent de recalculer : le montant d'entrée et ses deux bornes,
+le nombre de jours et la forme de la décroissance.
+
+Le quatrième trou est d'une autre nature et vaut d'être noté à part.
+
+Le cas `base_legale` mérite sa nuance : les trois membres de `TypeCedant` sont
+tous des clés de `BASES_LEGALES`, donc le défaut de `.get()` ne se déclenche
+jamais. La mutation survit parce que le code est **mort**, pas parce que le
+test est aveugle — le cas atteignable, lui, est couvert. Et
+`tools/symboles_morts.py` ne le voit pas : c'est une expression, pas un
+symbole. L'audit du code mort s'arrête aux définitions de premier niveau.
+
+`annonces_exploitables` n'était asserté que sur un corpus où *toutes* les
+annonces étaient des candidates. Les deux grandeurs y sont égales, donc le test
+ne pouvait pas les distinguer — il était vert quelle que soit celle qu'on lui
+donnait. **Un test qui ne peut pas distinguer deux valeurs ne garde ni l'une ni
+l'autre**, et il faut construire le cas où elles diffèrent pour le savoir : ici
+un corpus contenant des apports, exploitables mais jamais candidats.
+
+Les quatre trous ont été fermés, et les quatre mutations sont rejouées vertes
+— c'est-à-dire rouges. La suite passe de 446 à 450 tests.
+
 ### Leçon générale : un tri en amont est un filtre
 
 Découvert en Phase 4, mais valable bien au-delà de ce projet.

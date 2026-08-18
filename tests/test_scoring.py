@@ -250,6 +250,41 @@ def test_chaque_contribution_porte_un_motif(grille: GrillePonderation) -> None:
         assert contribution.motif.strip(), f"{contribution.critere} sans motif"
 
 
+def test_le_motif_du_montant_cite_le_montant_et_ses_bornes(grille: GrillePonderation) -> None:
+    """Le test precedent ne verifie que la PRESENCE d'un motif. Un motif present
+    et generique — « contribution calculee » — le passe sans rien expliquer :
+    mesure faite, la mutation survit aux 446 tests.
+
+    Or la contrainte 5 ne demande pas qu'un motif existe, elle demande que le
+    detail du CALCUL soit la. Un lecteur doit pouvoir refaire l'operation :
+    il lui faut le montant d'entree, l'echelle, et les deux bornes.
+    """
+    evaluation = evaluer(evenement(montant=250_000.0), grille, aujourdhui=AUJOURDHUI)
+    motif = next(c for c in evaluation.contributions if c.critere == "montant").motif
+
+    assert "250,000" in motif, f"le montant d'entree doit figurer : {motif!r}"
+    assert "log" in motif.lower(), f"l'echelle doit figurer : {motif!r}"
+    assert f"{grille.montant.plancher_eur:,.0f}" in motif
+    assert f"{grille.montant.plafond_eur:,.0f}" in motif
+
+
+def test_le_motif_de_la_fraicheur_cite_le_delai_et_la_forme(grille: GrillePonderation) -> None:
+    """Meme trou, meme cause. `test_le_breakdown_dit_quelle_date_a_servi` garde
+    l'ORIGINE de la date ; personne ne gardait le NOMBRE DE JOURS ni la forme
+    de la decroissance — retirer le delai du motif laissait les 446 tests verts.
+
+    C'est le chiffre le plus decisif du metier : sans lui, le motif dit d'ou
+    part le compte sans jamais dire combien.
+    """
+    acte = date(2026, 6, 1)
+    evaluation = evaluer(evenement(date_acte=acte), grille, aujourdhui=AUJOURDHUI)
+    motif = next(c for c in evaluation.contributions if c.critere == "fraicheur").motif
+
+    assert f"{(AUJOURDHUI - acte).days} jours" in motif, f"le delai doit figurer : {motif!r}"
+    assert grille.fraicheur.forme in motif, f"la forme doit figurer : {motif!r}"
+    assert str(grille.fraicheur.demi_vie_jours) in motif
+
+
 def test_la_grille_est_deterministe(grille: GrillePonderation) -> None:
     premiere = evaluer(evenement(), grille, aujourdhui=AUJOURDHUI)
     seconde = evaluer(evenement(), grille, aujourdhui=AUJOURDHUI)

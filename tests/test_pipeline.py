@@ -24,8 +24,10 @@ from datetime import date, timedelta
 
 import pytest
 
-from fundora_prospect.bodacc import Annonce, Cedant
-from fundora_prospect.pipeline import motif_ecart, repartir
+from fundora_prospect.bodacc import Annonce, Cedant, ResultatRecherche
+from fundora_prospect.enrichment import Enrichissement
+from fundora_prospect.models import StatutEntreprise
+from fundora_prospect.pipeline import executer, motif_ecart, repartir
 from fundora_prospect.prix import Confiance, PrixCession, Qualification
 
 
@@ -141,3 +143,42 @@ def test_sans_seuil_aucune_annonce_n_est_ecartee_sur_le_montant() -> None:
 
     assert len(candidats) == 2
     assert "sous le montant minimum" not in ecartes
+
+
+# --- Les compteurs comptent bien leur population ------------------------------
+
+
+def test_les_exploitables_ne_sont_pas_les_candidats() -> None:
+    """`annonces_exploitables` n'etait asserte que sur un corpus ou TOUTES les
+    annonces etaient des candidates. Les deux grandeurs y sont egales, donc le
+    test ne pouvait pas les distinguer : remplacer `len(annonces)` par
+    `len(candidats)` laissait les 446 tests verts.
+
+    Un test qui ne peut pas distinguer deux valeurs ne garde ni l'une ni
+    l'autre. Il faut construire le cas ou elles different — ici deux apports,
+    exploitables mais jamais candidats.
+
+    L'enjeu n'est pas theorique : c'est le compteur ne au constat que
+    `annonces_examinees` annoncait 458 pour une population de 662.
+    """
+    corpus = [
+        fabriquer_annonce("VENTE-1", 300_000),
+        fabriquer_annonce("VENTE-2", 400_000),
+        fabriquer_annonce("VENTE-3", 500_000),
+        fabriquer_annonce("APPORT-1", 600_000, qualification=Qualification.APPORT),
+        fabriquer_annonce("APPORT-2", 700_000, qualification=Qualification.APPORT),
+    ]
+    resultat = executer(
+        departements=["06"],
+        rechercher=lambda **_: ResultatRecherche(
+            annonces=corpus, publiees=len(corpus), rapatriees=len(corpus)
+        ),
+        enrichir=lambda siren, **_: Enrichissement(
+            siren=str(siren or ""), statut=StatutEntreprise.ACTIVE, motif="fixture"
+        ),
+    )
+    stats = resultat.statistiques
+
+    assert stats["annonces_exploitables"] == 5, "les apports restent exploitables"
+    assert stats["candidats_avant_enrichissement"] == 3, "ils ne sont pas candidats"
+    assert stats["ecartes"]["apport"] == 2

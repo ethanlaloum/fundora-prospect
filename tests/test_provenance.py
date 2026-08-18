@@ -163,6 +163,30 @@ def test_la_serialisation_conserve_le_lead_et_son_breakdown() -> None:
     assert charge["breakdown"][0]["motif"]
 
 
+def test_la_serialisation_ne_confond_aucun_champ_du_breakdown() -> None:
+    """Le test precedent verifie que le motif EXISTE. Il ne verifie pas qu'il
+    porte le motif : remplacer `c.motif` par `c.critere` dans `serialiser`
+    laisse les 446 tests verts — le champ reste present, non vide, et faux.
+
+    `serialiser` est un mappeur, et un mappeur se garde champ par champ. Une
+    permutation de deux champs de meme type est invisible a toute assertion de
+    presence, et c'est la seule erreur qu'un mappeur commet vraiment.
+    """
+    event = fabriquer_event()
+    evaluation = fabriquer_evaluation(event)
+    charge = prov.serialiser(prov.assembler(event, evaluation))
+
+    assert len(charge["breakdown"]) == len(evaluation.contributions)
+    for rendu, source in zip(charge["breakdown"], evaluation.contributions, strict=True):
+        assert rendu["critere"] == source.critere
+        assert rendu["motif"] == source.motif
+        assert rendu["points"] == source.points
+        assert rendu["poids"] == source.poids
+        # Le motif explique le critere, il ne le repete pas : si les deux sont
+        # egaux, c'est le symptome exact de la permutation.
+        assert rendu["motif"] != rendu["critere"]
+
+
 def test_une_annonce_sans_url_ne_peut_pas_devenir_un_lead() -> None:
     """`url_complete` est renseigne nativement par BODACC, mais le client le
     replie sur `""` s'il manque. Ce cas doit buter sur la provenance, pas
