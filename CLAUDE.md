@@ -1522,6 +1522,117 @@ ce n'est pas un protocole, c'est un faisceau. Il est écrit ici parce qu'aucune
 autre trace du projet ne dit si sa méthode marche, et qu'un faisceau mesuré
 vaut mieux qu'une conviction.
 
+### Étape 2 ✅ — `api.py`, la surface web
+
+Cinq routes, **126 lignes de code contre 172 pour `mcp_server`** : FastAPI
+absorbe nativement la validation que l'autre surface fait à la main.
+
+| Route | Rend |
+|---|---|
+| `GET /leads` | la sortie produit, même forme que `search_liquidity_events` |
+| `GET /evenements/{id}` | un cas, **écarté compris**, avec révisions et transitions |
+| `GET /collecte` | ce que la base sait, et quand elle a regardé |
+| `GET /sorties` | les cédants qui ont cessé, datés |
+| `POST /hypotheses` | le score d'une cession décrite à la main |
+
+**Aucune route ne touche au réseau.** Le job collecte, l'API relit. Une route
+d'enrichissement rouvrirait un appel API dans le temps de réponse — exactement
+ce que la base a été créée pour supprimer.
+
+**`127.0.0.1`, et ce n'est pas du confort.** Cette surface sert
+`cedant_denomination`, qui *est* un nom de personne sur ~20 % des cédants
+(contrainte 4). Le fichier SQLite vit déjà hors du dépôt pour cette raison ;
+l'exposer annulerait la décision d'un cran plus loin. `HOTE_DEFAUT` n'est pas
+surchargeable : le rendre configurable ferait de l'exposition un réglage.
+
+**Une connexion par requête.** Les connexions `sqlite3` ne traversent pas les
+threads et FastAPI exécute les routes synchrones dans un pool.
+
+#### Les trois tests qui ne peuvent exister qu'entre deux surfaces
+
+C'est la leçon du palier 2 — `motif_ecart_faits` comparé sur ses deux chemins —
+appliquée cette fois entre deux façades. **Aucun test d'une surface isolée ne
+peut voir une divergence :** chacune est verte avec son propre vocabulaire.
+
+1. **Les clés d'enveloppe, les motifs de refus et le breakdown** sont comparés
+   entre `/leads` et `search_liquidity_events` sur le même corpus. Les
+   *populations*, elles, ne sont jamais comparées — elles diffèrent par
+   construction et c'est documenté juste en dessous.
+2. **La provenance ne peut pas sortir de la porte unique.** Le contrôle porte
+   sur le **graphe d'appel** et non sur la réponse : une assertion sur la sortie
+   ne distingue pas un lead sérialisé d'un lead monté à la main qui lui
+   ressemble — c'est précisément le défaut de la Phase 3 bis. Un test lit l'AST
+   de `api.py` et vérifie qu'il n'importe pas `provenance` et n'appelle ni
+   `serialiser` ni `assembler`. L'analyse est syntaxique parce qu'une recherche
+   textuelle du mot interdirait d'en parler dans les commentaires.
+3. **`/hypotheses` et `score_lead` rendent la MÊME valeur**, pas la même forme.
+   La mise en forme a été extraite dans `models.presenter_evaluation` — elle
+   existait déjà en double entre `provenance.serialiser` et l'outil MCP, et une
+   troisième copie allait naître.
+
+**Sur cette surface, `provenance incomplete` est impossible par construction**,
+et c'est le schéma qui le garantit, pas la route : le `CHECK` du palier 1 refuse
+une URL non absolue à l'écriture. Prouvé plutôt que déduit — « devrait valoir
+zéro » est la formule qui a produit tous les défauts de ce projet.
+
+#### Un faux ami en test : substituer la dépendance de connexion
+
+La première version des tests substituait `api.connexion` par une connexion de
+fixture. Échec immédiat, et **pour la bonne raison** : `TestClient` exécute les
+routes dans un thread de travail, la connexion venait du thread du test, SQLite
+refuse. C'est exactement le bug que la dépendance évite en production.
+
+Le réflexe aurait été de contourner — et la dépendance, seule chose qui gère le
+cycle de vie des connexions, n'aurait jamais été exercée. Les tests passent donc
+par `FUNDORA_DB` et laissent tourner le vrai code.
+
+#### Le garde-fou « dix lignes par route » a mal vieilli
+
+Deux corps le dépassent. Mesuré avant de conclure : `leads` fait 17 lignes et
+prend **zéro décision** — trois affectations, un appel au cœur, une enveloppe de
+neuf lignes. La longueur y mesure la taille de la réponse.
+
+`evenement` est le seul à brancher, et c'est là que la relecture a payé : la
+branche `transitions(...) if siren else []` n'était gardée par aucun test. Sans
+elle, un événement sans cédant identifié récupérait le journal de **toutes** les
+sociétés. Pas une fuite hors du système — une attribution fausse, ce qui est
+pire dans une fiche d'audit qu'une absence.
+
+**Le critère devient le nombre de décisions, pas le nombre de lignes.** Une
+route qui assemble un gros dict reste une route ; une route qui teste trois
+conditions commence à juger. La longueur garde son rôle de déclencheur de
+relecture, elle perd celui de verdict.
+
+#### `symboles_morts` gagne une quatrième justification
+
+L'audit signalait `Hypothese` — jamais construite par nous, seulement annotée.
+C'est FastAPI qui la construit à chaque requête, la même situation que
+`@serveur.tool` un cran plus loin : le framework construit non pas la fonction
+mais **son argument**.
+
+L'exemption est étroite et ne contredit pas la règle « une annotation n'est pas
+un usage » : ce qui justifie n'est pas l'annotation, c'est d'annoter le
+paramètre d'une fonction **enregistrée par un décorateur**. Sans enregistrement,
+l'annotation ne vaut toujours rien — et un décorateur *inerte* (`@cache`,
+`@dataclass`) ne compte pas davantage ici qu'ailleurs. Les deux moitiés sont
+testées, parce qu'une exemption dont on ne teste que le côté permissif finit par
+tout justifier.
+
+Coût assumé : une voie de plus vers le silence. L'alternative — inscrire
+`Hypothese` dans une liste blanche — fait grossir une liste que personne ne
+relit.
+
+#### Treize mutations, zéro survivante
+
+Écrites **pendant** les tests et non après, conformément à la leçon des paliers
+4-5. Huit sur les routes (clé d'enveloppe renommée, `montant_min` ignoré,
+compteurs de collecte non passés, `limite` ignorée, fenêtre ignorée,
+`/hypotheses` remontant sa propre mise en forme, 404 transformé en 200, `sorties`
+rendant toutes les bascules), une sur la porte de provenance (`classer` montant
+son dict à la main — neuf tests rougissent, dont ceux des deux surfaces), une
+sur le garde `siren`, deux sur la nouvelle règle de l'audit, une sur `api.py`
+important `provenance`.
+
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
 **Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc

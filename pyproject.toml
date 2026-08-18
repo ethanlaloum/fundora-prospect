@@ -15,11 +15,21 @@ dependencies = [
 fundora-prospect-mcp = "fundora_prospect.mcp_server:main"
 
 [project.optional-dependencies]
+# La surface web est OPTIONNELLE. Le plugin Claude Code n'en a pas besoin, et
+# le coeur encore moins : `api.py` en depend, rien d'autre. Un `pip install`
+# nu doit continuer a donner un serveur MCP fonctionnel sans tirer starlette.
+web = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
     # Lecture du frontmatter des SKILL.md dans les tests du plugin.
     "pyyaml>=6.0",
+    # `dev` inclut `web` : les tests de l'API font partie de la suite, et une
+    # suite qui saute des tests selon ce qui est installe ne prouve rien.
+    "fundora-prospect[web]",
 ]
 
 [build-system]

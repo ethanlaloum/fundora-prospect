@@ -138,6 +138,46 @@ class Evaluation(BaseModel):
 ScoreBreakdown = Evaluation
 
 
+def presenter_contributions(evaluation: Evaluation) -> list[dict[str, Any]]:
+    """Le breakdown de la contrainte 5, mis en forme **une seule fois**.
+
+    Cette liste existait en double : dans `provenance.serialiser` pour un lead,
+    et dans l'outil MCP `score_lead` pour une hypothese. Mêmes quatre clefs,
+    même ordre, deux endroits — et une troisieme copie allait naitre avec la
+    surface web. Trois copies d'une mise en forme, c'est trois vocabulaires qui
+    divergeront le jour ou l'un gagne un champ.
+
+    Elle vit dans `models` et non dans `pipeline` parce que `provenance` en a
+    besoin : `pipeline` importe `provenance`, l'inverse serait un cycle. Le bon
+    etage est celui que les deux consommateurs importent deja.
+    """
+    return [
+        {
+            "critere": c.critere,
+            "points": c.points,
+            "poids": c.poids,
+            "motif": c.motif,
+        }
+        for c in evaluation.contributions
+    ]
+
+
+def presenter_evaluation(evaluation: Evaluation) -> dict[str, Any]:
+    """Une evaluation complete — verdict, score, motif de refus, breakdown.
+
+    C'est la forme que rendent les deux surfaces quand on leur soumet une
+    cession decrite a la main. `serialiser` n'en prend que le breakdown : un
+    lead porte deja son score au premier niveau, et n'a pas de motif de refus
+    puisqu'un lead refuse n'est pas serialise.
+    """
+    return {
+        "classable": evaluation.classable,
+        "score": evaluation.score,
+        "motif_refus": evaluation.motif_refus,
+        "breakdown": presenter_contributions(evaluation),
+    }
+
+
 class Provenance(BaseModel):
     """Contrainte 3 : d'ou vient ce lead, et quel segment il concerne.
 

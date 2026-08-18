@@ -102,6 +102,79 @@ def test_un_appel_sauve_un_symbole(tmp_path: Path) -> None:
     assert {s.nom for s in auditer(tmp_path)} == set()
 
 
+def test_un_modele_annotant_un_parametre_ENREGISTRE_est_justifie(tmp_path: Path) -> None:
+    """Le cas `Hypothese` : FastAPI la construit a chaque requete, aucun Python
+    ne la nomme en position d'appel."""
+    depot_factice(
+        tmp_path,
+        """
+        def route(f):
+            return f
+
+        class Corps:
+            pass
+
+        @route
+        def poster(corps: Corps) -> int:
+            return 1
+        """,
+        consommateur="from paquet.module import route\n\nroute(None)\n",
+    )
+    assert "Corps" not in {s.nom for s in auditer(tmp_path)}
+
+
+def test_un_modele_annotant_un_parametre_ORDINAIRE_reste_signale(tmp_path: Path) -> None:
+    """**L'autre moitie, et c'est elle qui empeche l'exemption de tout avaler.**
+
+    Sans ce cas, la regle « une annotation de parametre justifie » vaudrait
+    partout, et le cas `Provenance` — annote, mort — redeviendrait invisible.
+    Ce qui justifie n'est pas l'annotation, c'est le DECORATEUR d'enregistrement
+    qui prouve qu'un appelant externe existe.
+    """
+    depot_factice(
+        tmp_path,
+        """
+        class Corps:
+            pass
+
+        def ordinaire(corps: Corps) -> int:
+            return 1
+        """,
+        consommateur="from paquet.module import ordinaire\n\nordinaire(None)\n",
+    )
+    assert "Corps" in {s.nom for s in auditer(tmp_path)}, (
+        "sans enregistrement, une annotation de parametre ne justifie rien"
+    )
+
+
+def test_un_decorateur_INERTE_ne_justifie_pas_l_annotation_d_un_parametre(
+    tmp_path: Path,
+) -> None:
+    """`@cache` transforme la fonction sur place, il ne la confie a personne.
+
+    La nouvelle exemption doit reutiliser la MEME frontiere que l'ancienne —
+    `_est_un_enregistrement` — et pas s'en inventer une plus large du genre
+    « la fonction porte un decorateur ». Le decorateur doit ENREGISTRER.
+    """
+    depot_factice(
+        tmp_path,
+        """
+        from functools import cache
+
+        class Corps:
+            pass
+
+        @cache
+        def calcule(corps: Corps) -> int:
+            return 1
+        """,
+        consommateur="from paquet.module import calcule\n\ncalcule(None)\n",
+    )
+    assert "Corps" in {s.nom for s in auditer(tmp_path)}, (
+        "un decorateur inerte ne confie le symbole a personne"
+    )
+
+
 def test_un_symbole_decore_est_justifie(tmp_path: Path) -> None:
     """Les trois outils MCP : appeles par le protocole, jamais par du Python."""
     depot_factice(

@@ -44,7 +44,28 @@ Deux formes d'usage reel n'apparaissent pas en position d'appel :
 
 - un symbole **decore** (`@serveur.tool`) est appele par le protocole MCP ;
 - une enumeration ou dataclass utilisee **par attribut** (`Qualification.ACHAT`,
-  `GrillePonderation.defaut()`) : c'est l'attribut qui est appele, pas le nom.
+  `GrillePonderation.defaut()`) : c'est l'attribut qui est appele, pas le nom ;
+- un modele **annotant un parametre d'une fonction elle-meme enregistree**
+  (`def hypothese(corps: Hypothese)` sous `@app.post`) : c'est le framework qui
+  le construit a chaque requete.
+
+### La troisieme exemption ne contredit pas la regle sur les annotations
+
+Elle a l'air de la contredire, et il faut voir pourquoi elle ne le fait pas.
+Ce qui justifie `Hypothese`, ce n'est **pas** d'etre annotee — `Provenance`
+l'etait aussi, et elle etait morte. C'est d'annoter le parametre d'une fonction
+**enregistree aupres d'un framework**. L'enregistrement est ce qui prouve
+qu'un appelant externe existe ; l'annotation ne fait que lui dire quoi
+construire.
+
+Sans l'enregistrement, l'annotation ne vaut toujours rien. Un modele annotant
+une fonction ordinaire reste signale, et c'est teste.
+
+Le cout de cette exemption est reel : elle ouvre une voie de plus vers le
+silence. Elle est acceptee parce que l'alternative — declarer `Hypothese` dans
+une liste blanche — fait grossir une liste que personne ne relit, et parce
+qu'elle reste bornee par la meme condition que les autres, la presence d'un
+decorateur d'enregistrement.
 
 Ces cas sont reconnus automatiquement et affiches AVEC leur justification. Un
 symbole sans appel et sans justification reconnue fait echouer le test.
@@ -105,6 +126,7 @@ class Symbole:
     appele_dans: set[str] = field(default_factory=set)
     annote_dans: set[str] = field(default_factory=set)
     attribut_appele_dans: set[str] = field(default_factory=set)
+    annote_un_parametre_enregistre_dans: set[str] = field(default_factory=set)
 
     @property
     def justification(self) -> str | None:
@@ -116,6 +138,8 @@ class Symbole:
         enregistrement = [d for d in self.decorateurs if _est_un_enregistrement(d)]
         if enregistrement:
             return f"decore par @{enregistrement[0].split('(')[0]}"
+        if self.annote_un_parametre_enregistre_dans:
+            return "construit par le framework (parametre d'une fonction enregistree)"
         return None
 
     @property
@@ -163,6 +187,34 @@ def _noeuds_d_annotation(arbre: ast.AST) -> set[int]:
     return dedans
 
 
+def _annotations_de_parametres_enregistres(arbre: ast.AST) -> set[str]:
+    """Noms cites dans les annotations de parametres d'une fonction ENREGISTREE.
+
+    `def hypothese(corps: Hypothese)` sous `@app.post` : FastAPI construit un
+    `Hypothese` a chaque requete, sans qu'aucun Python ne le nomme en position
+    d'appel. C'est la meme situation que `@serveur.tool`, un cran plus loin —
+    le framework construit non pas la fonction, mais son argument.
+
+    **La condition est le decorateur, jamais l'annotation seule.** Une
+    annotation sur une fonction ordinaire ne justifie toujours rien : c'est ce
+    qui rendait `Provenance` invisible, et ca reste signale.
+    """
+    noms: set[str] = set()
+    for noeud in ast.walk(arbre):
+        if not isinstance(noeud, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        decorateurs = [ast.unparse(d) for d in noeud.decorator_list]
+        if not any(_est_un_enregistrement(d) for d in decorateurs):
+            continue
+        arguments = noeud.args
+        for argument in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]:
+            if argument.annotation is not None:
+                noms.update(
+                    sous.id for sous in ast.walk(argument.annotation) if isinstance(sous, ast.Name)
+                )
+    return noms
+
+
 def analyser(racine: Path, symboles: dict[str, Symbole]) -> None:
     """Remplit les usages de chaque symbole, par nature."""
     for dossier in DOSSIERS_ANALYSES:
@@ -176,6 +228,8 @@ def analyser(racine: Path, symboles: dict[str, Symbole]) -> None:
             except SyntaxError:
                 continue
             annotations = _noeuds_d_annotation(arbre)
+            for nom in _annotations_de_parametres_enregistres(arbre) & symboles.keys():
+                symboles[nom].annote_un_parametre_enregistre_dans.add(etiquette)
 
             for noeud in ast.walk(arbre):
                 if isinstance(noeud, ast.Call):

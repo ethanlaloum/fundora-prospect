@@ -44,7 +44,7 @@ from mcp.server import MCPServer
 from fundora_prospect import __version__, pipeline
 from fundora_prospect.bodacc import rechercher
 from fundora_prospect.enrichment import enrichir, siren_valide
-from fundora_prospect.models import StatutEntreprise
+from fundora_prospect.models import StatutEntreprise, presenter_evaluation
 from fundora_prospect.pipeline import (
     LIMITE_DEFAUT,
     LIMITE_MAX,
@@ -225,23 +225,16 @@ def score_lead(
             f"statut_cedant invalide : {statut_cedant!r}. Attendu l'un de : {attendus}."
         ) from exc
 
-    evaluation = pipeline.evaluer_hypothese(
-        montant_eur=montant_eur,
-        date_acte=_date(date_acte, "date_acte"),
-        date_parution=_date(date_parution, "date_parution"),
-        departement=departement,
-        statut_cedant=statut,
-        code_ape=code_ape,
+    return presenter_evaluation(
+        pipeline.evaluer_hypothese(
+            montant_eur=montant_eur,
+            date_acte=_date(date_acte, "date_acte"),
+            date_parution=_date(date_parution, "date_parution"),
+            departement=departement,
+            statut_cedant=statut,
+            code_ape=code_ape,
+        )
     )
-    return {
-        "classable": evaluation.classable,
-        "score": evaluation.score,
-        "motif_refus": evaluation.motif_refus,
-        "breakdown": [
-            {"critere": c.critere, "points": c.points, "poids": c.poids, "motif": c.motif}
-            for c in evaluation.contributions
-        ],
-    }
 
 
 def main() -> None:
