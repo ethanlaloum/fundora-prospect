@@ -550,9 +550,27 @@ Deux règles apprises en écrivant l'outil :
   qui crie au loup est désactivé dans la semaine.** Le biais va donc vers le
   silence — il peut manquer un mort, il ne doit pas en inventer.
 
-#### La limite de l'outil : il voit des symboles, pas des expressions
+#### Les trois familles que l'audit ne voit pas
 
-Trouvée en Phase 6, par un cas concret. `provenance.base_legale` s'écrit :
+Elles se sont trouvées une par une, et elles ont la **même cause** : l'outil
+ramasse les `ClassDef` et `FunctionDef` de **premier niveau** de `src/`, puis
+cherche leur nom en position d'appel. Tout ce qui n'est pas un symbole de
+premier niveau lui est invisible, quel que soit son degré de mort.
+
+| Famille | Exemple sur ce projet | Pourquoi invisible |
+|---|---|---|
+| **Expressions inatteignables** | le repli `INCONNU` de `base_legale` | une branche n'est pas un symbole |
+| **Attributs jamais lus** | `Ecriture.revision`, `Ecriture.transition` | la classe est construite, donc vivante |
+| **Structures de données** | une table ou une colonne que rien ne lit | hors du langage audité |
+
+Les trois se ressemblent à l'usage : du code qu'on lit, qu'on maintient, qu'on
+migre — et que rien n'exécute. Aucune n'est signalée, et **aucune ne le sera** :
+voir « on ne corrige pas l'outil », plus bas. Ce qui les rattrape est ailleurs —
+la revue, la mutation, et pour les tables la règle « on ne crée que ce qu'on
+utilise », qui les empêche d'exister plutôt que de les détecter.
+
+**Famille 1 — les expressions.** Trouvée en Phase 6, par un cas concret.
+`provenance.base_legale` s'écrit :
 
 ```python
 return BASES_LEGALES.get(type_cedant, BASES_LEGALES[TypeCedant.INCONNU])
@@ -567,11 +585,39 @@ ne ramasse que les `ClassDef` et `FunctionDef` de **premier niveau** dans
 inatteignable, une clause `else` que rien ne peut atteindre — rien de tout cela
 n'est un symbole, donc rien de tout cela n'est audité.
 
-**On ne corrige pas l'outil.** Détecter du code inatteignable demande une
-analyse de flux, pas une lecture de noms : c'est un autre outil, avec un autre
-taux de faux positifs, et la règle « un audit qui crie au loup est désactivé
-dans la semaine » s'appliquerait immédiatement. La limite est écrite ici pour
-qu'on sache où l'audit s'arrête, pas pour être comblée.
+**Famille 2 — les attributs.** Trouvée au palier 5, sur `Ecriture`. La classe
+était rendue avec trois champs ; **un seul, `nouveau`, était lu**. Les deux
+autres se justifiaient par « éviter à l'appelant de relire la base » — alors que
+`collecte` la relit délibérément, parce que les journaux doivent dire ce que la
+base *contient* et non ce que le code croit y avoir mis. La justification
+contredisait le design retenu, et personne ne l'a vu pendant deux commits.
+
+L'audit, lui, ne pouvait pas la voir : `Ecriture(...)` apparaît en position
+d'appel, donc la classe est vivante — et l'outil s'arrête là. Il ne descend pas
+dans les champs, pas plus qu'il ne descend dans les branches. **Une classe
+vivante peut être aux deux tiers morte.**
+
+Le cas est plus insidieux que celui des expressions, parce qu'un champ mort ne
+se contente pas de ne rien faire : il **affirme quelque chose**. Un lecteur qui
+voit `Ecriture.transition` en conclut que l'appelant s'en sert, et se demande
+lequel. C'est de la documentation fausse au format d'un type.
+
+**Famille 3 — les tables et les colonnes.** Écrite au gate de la Phase 6, avant
+d'avoir un cas : « une colonne que rien ne lit est de la donnée morte, et
+`tools/symboles_morts.py` ne voit pas les colonnes ». C'est la raison pour
+laquelle `collecte_ecart` n'a pas été créée et pour laquelle aucune colonne de
+score n'existe. Ici la parade n'est pas la détection mais l'abstention : on ne
+crée une table qu'au palier qui la lit.
+
+**On ne corrige pas l'outil**, pour aucune des trois. Détecter du code
+inatteignable demande une analyse de flux, pas une lecture de noms. Détecter un
+attribut jamais lu demande de résoudre les types — or l'outil ne les résout
+délibérément pas, et cette tolérance est ce qui l'empêche de crier au loup sur
+les homonymes. Détecter une colonne morte demande de lire du SQL en chaînes.
+Chacune est un autre outil, avec un autre taux de faux positifs, et la règle
+« un audit qui crie au loup est désactivé dans la semaine » s'appliquerait
+immédiatement. **Ces limites sont écrites pour qu'on sache où l'audit s'arrête,
+pas pour être comblées.**
 
 Ce que ça implique en pratique : **une mutation qui survit ne prouve pas
 toujours un trou de test.** Elle peut porter sur du code que rien n'atteint. Il
@@ -592,7 +638,7 @@ et son contenu n'était lu par personne. Un motif écrit « apport en nature »
 d'un côté et « apport » de l'autre aurait cassé tout comptage agrégeant les
 deux sources sans qu'aucun test ne rougisse.
 
-#### C'est le quatrième visage du même mécanisme
+#### Les six visages du même mécanisme
 
 | Ce qu'on vérifiait | Ce qu'on croyait vérifier | Pourquoi c'était aveugle |
 |---|---|---|
@@ -600,6 +646,8 @@ deux sources sans qu'aucun test ne rougisse.
 | **Le compteur a une valeur** (`annonces_examinees`) | qu'il décrit sa population | il décrivait un budget, sous un nom qui promet un total |
 | **L'exemple est présent** (`SKILL.md`) | qu'il est à jour | la valeur avait survécu au changement de sa source |
 | **La structure est non vide** (`ecartes`) | qu'elle dit la bonne chose | la présence et le contenu sont deux propriétés distinctes |
+| **Le nombre est exact** (`annonces_exploitables == 3`) | qu'il désigne la bonne grandeur | le corpus rendait deux grandeurs égales |
+| **Le code traite bien l'entrée** (`collecte` avec `enrichis`) | qu'il traite bien le RÉEL | l'entrée était fabriquée, la source ne la produit jamais |
 
 Le mécanisme commun : **ce qui est facile à vérifier se substitue à ce qui
 compte.** Présence, nom, non-vacuité, existence — quatre propriétés bon marché
@@ -682,6 +730,53 @@ départage pas.
 
 Les quatre trous ont été fermés, et les quatre mutations sont rejouées : quatre
 détectées. La suite passe de 446 à 450 tests.
+
+#### Le sixième visage : un test alimenté à la main, sur une donnée que la source ne produit jamais
+
+C'est le plus difficile à voir des six, et pour une raison structurelle :
+**aucune mutation du code de production ne le révèle.**
+
+Le cas, au palier 2. `lire` accepte un dict `collecte` porteur des compteurs de
+population. Le test qui vérifiait que la réserve « l'étendue de la collecte
+n'est pas connue » disparaît bien lui passait ceci :
+
+```python
+collecte={
+    "annonces_publiees": 662,
+    ...
+    "classables_parmi_les_enrichis": 1,   # <- n'existe que sur le chemin direct
+    "enrichis": 1,                        # <- idem
+}
+```
+
+Le test passait. `resumer` traitait correctement ce dict. Mais **la source
+réelle — `entrepot.compteurs_de_collecte`, écrite un palier plus tard — ne
+produit jamais ces deux clés** : ce sont des compteurs de budget
+d'enrichissement, qui n'ont de sens que sur le chemin direct. Le test validait
+un contrat que personne n'honore.
+
+Pourquoi la mutation ne le voit pas : muter le code de production ne change pas
+l'entrée du test. Le test continue de fabriquer son dict, et la mutation est
+détectée ou non selon qu'elle touche le chemin *fabriqué*. Le défaut n'est pas
+dans le code testé, il est dans **l'écart entre l'entrée du test et l'entrée
+réelle** — un espace où aucune mutation ne va.
+
+Ce que ça implique, et qui coûte plus cher que les cinq autres remèdes :
+
+**Un test dont l'entrée est fabriquée ne prouve rien sur la production tant
+qu'un autre test n'a pas branché le même chemin sur la vraie source.** Les
+doubles restent légitimes — la suite entière repose dessus, et elle tourne en
+5 secondes sans réseau grâce à eux. Mais chaque contrat entre deux modules doit
+avoir **au moins un** test qui les branche réellement l'un sur l'autre.
+
+Ici, c'est `tests/test_collecte.py::test_la_reserve_d_etendue_disparait_quand_le_job_a_tourne` :
+il fait tourner le job, lit la table qu'il a remplie, et passe ces compteurs-là
+à `resumer`. C'est ce test qui a montré que le dict du palier 2 était une
+fiction — pas une mutation, pas une relecture.
+
+Le signal à surveiller : **un littéral dans un test qui décrit la sortie d'un
+autre module.** Chaque clé écrite à la main y est une hypothèse sur un contrat,
+et une hypothèse non vérifiée finit par être fausse.
 
 ### Leçon générale : un tri en amont est un filtre
 
@@ -1076,6 +1171,35 @@ nombre figé qu'on ne peut plus recalculer ni justifier. Les seules qui restent
 invisibles sont celles sans cédant : `construire_annonce` rend `None`, il n'y a
 même pas d'`id`. Elles ne peuvent être que **comptées**.
 
+#### `collecte_ecart` : table VALIDÉE au gate, ABANDONNÉE au palier 3
+
+Elle figurait dans le schéma proposé, elle a été validée, et elle n'existe pas.
+La décision est écrite ici plutôt que d'avoir simplement disparu — sinon
+quelqu'un relira le schéma initial, constatera la table manquante, et la
+recréera en croyant réparer un oubli.
+
+**Le motif.** Elle devait porter le décompte des refus par motif, une ligne par
+`(collecte, motif)`. Mais la même proposition décidait de **stocker les annonces
+écartées** dans `evenement`. Les deux décisions se contredisent sans que ça se
+voie : dès lors que les écartés sont en base avec leur `qualification`, leur
+décompte par motif se **recalcule** à la lecture, par la même `motif_ecart_faits`
+que partout ailleurs.
+
+La table aurait donc figé une valeur dérivable — et elle aurait dérivé le jour
+du premier renommage de motif : la base aurait continué à servir « apport en
+nature » quand le code dit « apport ». C'est la leçon « un paramètre recopié
+dérive de sa source », appliquée à une table.
+
+Ne restent en base que les **quatre nombres qu'aucune relecture ne peut
+retrouver** : `annonces_publiees` (ce que le BODACC déclarait contenir),
+`annonces_rapatriees` (ce qu'on en a lu), `sans_cedant_ou_illisibles` (écartées
+avant d'avoir un `id`, donc sans ligne où être comptées) et `plafond_atteint`.
+
+**Le test de recréation :** si une donnée peut se recalculer depuis ce qui est
+déjà stocké, la stocker en second exemplaire crée une divergence future, pas une
+commodité. Si elle ne le peut pas, elle doit être stockée. C'est le seul critère
+qui a servi à trancher le contenu de `collecte`.
+
 **`montant_min` disparaît de la collecte.** Le job ramasse tout ; le seuil
 devient un filtre de lecture. Sinon le relever imposerait une recollecte.
 
@@ -1227,6 +1351,372 @@ part et annonçait alors 10 sociétés là où il n'y en a qu'une. Les deux lign
 ressemblent et ont deux rôles : l'une évite des appels, l'autre nomme une
 grandeur. Un commentaire le dit, pour qu'aucune relecture n'en « simplifie » une.
 
+### Palier 4 ✅ — le journal des transitions de statut
+
+`cedant_journal` : **une ligne par CHANGEMENT observé, jamais par sondage.**
+
+Trois choses n'y entrent pas, et c'est ce qui fait sa valeur :
+
+- **La première observation n'est pas une transition.** `cedant.enrichi_a` la
+  date déjà. L'écrire ferait ~3 300 lignes au premier balayage PACA, toutes
+  sans information.
+- **Un sondage qui confirme n'écrit rien.** Sinon la table grossit à chaque
+  passage en ne disant rien de plus.
+- **Une transition immobile est refusée par le schéma**, `CHECK (statut_avant
+  <> statut_apres)` — le même barrage que les `CHECK` de traçabilité du
+  palier 1 : il protège du code pas encore écrit.
+
+**Ce n'est pas une table d'audit, c'est un signal métier.** `active → cessee`
+date le moment où la société cédante a disparu, donc où le produit de cession
+est descendu aux associés : c'est la **date de sortie du prospect**. Le lead ne
+s'évanouit pas du classement, il en sort, et on sait quel jour. C'est la seule
+question qu'un décompte d'écartés ne peut pas trancher — il dit *combien*,
+jamais *depuis quand*.
+
+`sortie_du_flux` est testée sur un cas qui n'en est pas une (`inconnu →
+active`) : sans lui, une propriété qui rendrait toujours `True` passerait le
+test nominal.
+
+**`ResultatCollecte.transitions` et `.revisions` sont RELUS depuis la base**,
+pas accumulés pendant la boucle. Un compteur tenu au vol dirait ce que le code
+croit avoir écrit ; la relecture dit ce que la base contient. Les deux devraient
+coïncider — c'est justement pour ça qu'il faut lire, sinon on ne le saurait
+jamais.
+
+### Palier 5 ✅ — les révisions de fait, et la première migration qui ne peut plus être implicite
+
+`evenement.empreinte` + `evenement_revision`. Un rectificatif du BODACC et une
+régression de notre parser produisent le même symptôme : un fait qui n'est plus
+celui d'hier. **Écraser rend les deux indistinguables** ; la version remplacée
+est la seule trace qui permette de trancher, et `champs_modifies` dit lequel a
+bougé — un montant qui change seul ressemble à un rectificatif, un montant qui
+s'annule sur des dizaines de lignes le même jour ressemble à un parser cassé.
+
+**L'empreinte ne porte que les colonnes de FAIT.** Les dates de suivi en sont
+exclues : elles bougent à chaque passage, et les inclure conclurait à un
+changement du fait à chaque recollecte — une révision fantôme par ligne et par
+balayage, dans la table même qui doit servir à distinguer un vrai changement.
+
+**`date_collecte` date le FAIT STOCKÉ, `derniere_verification` date le
+passage.** Les faire avancer ensemble ferait de la seconde un doublon de la
+première, et on prétendrait avoir recollecté une donnée qu'on n'a fait que
+reconfirmer.
+
+**Le contenu archivé est un blob JSON, pas treize colonnes miroir.** Une trace
+d'audit se lit en entier pour comparer deux versions ; des colonnes miroir
+imposeraient une migration à chaque évolution d'`evenement`, alors que cette
+table doit survivre à ces évolutions sans les suivre.
+
+**`VERSION_SCHEMA` cesse ici d'être décoratif.** Les versions 1 et 2
+n'ajoutaient que des tables, et `IF NOT EXISTS` suffisait. La v3 ajoute une
+*colonne*, donc un `ALTER TABLE` — et surtout elle doit **calculer** les
+empreintes des lignes existantes. Laisser `''` ferait conclure à un changement
+dès la première recollecte : le faux positif de masse décrit ci-dessus.
+
+#### Sept mutations survivantes sur huit — dont trois d'une famille déjà nommée
+
+Balayage passé sur le code des deux paliers : **huit mutations, sept
+survivantes au premier passage**, zéro après correction. La huitième
+(`sorted(morceaux)`, qui ferait hacher un ensemble non ordonné) était déjà
+gardée.
+
+| Mutation | Premier passage | Ce qui manquait |
+|---|---|---|
+| `_ABSENT` vaut la chaîne `"None"` | **survit** | le test ne couvrait que la chaîne vide |
+| `_SEPARATEUR` devient `""` | **survit** | aucun test sur la frontière entre valeurs |
+| `transitions()` ignore `depuis` | **survit** | corpus à une seule date |
+| `revisions()` ignore `depuis` | **survit** | idem |
+| le `motif` du journal porte le statut | **survit** | `motif` n'était asserté nulle part |
+| `Ecriture.nouveau` vaut toujours `True` | **survit** | `evenements_nouveaux` non asserté |
+| `url_publication` sort de `COLONNES_DE_FAIT` | **survit** | 3 colonnes couvertes sur 13 |
+| l'empreinte hache un ensemble non ordonné | détectée | — |
+
+Trois enseignements, dont deux sont des rappels et un est nouveau.
+
+**Rappel — le corpus dégénéré, encore, deux fois.** Les filtres `depuis` ne
+pouvaient pas être pris en défaut parce que toutes les transitions du corpus
+portaient la même date, et `evenements_nouveaux` ne pouvait pas l'être parce
+que le corpus était entièrement neuf : `evenements_ecrits` et
+`evenements_nouveaux` y valaient le même nombre. Les nouveaux corpus séparent
+les grandeurs — trois balayages à trois dates, et un second passage qui réécrit
+une ligne connue en n'en apportant qu'une seule.
+
+**Rappel — un commentaire qui décrit un trou ne le referme pas.** Le
+commentaire de `_ABSENT` disait déjà, noir sur blanc, que la mutation avait
+survécu et que le cas de la chaîne vide n'était pas celui qu'il protégeait.
+Constat juste, laissé tel quel : le test manquant n'avait pas été écrit. **Une
+lucidité en commentaire n'est pas un garde-fou** — elle documente la dette, elle
+ne la paie pas. Même chose pour la docstring du test de permutation, qui
+invoquait encore un préfixe de nom retiré du code deux commits plus tôt : le
+chiffre qui survit à sa source, appliqué cette fois à une justification.
+
+**Nouveau — un CHAMP mort échappe à l'audit comme un symbole mort lui
+échappait.** `Ecriture` était rendue avec trois champs ; un seul, `nouveau`,
+était lu. Voir la troisième famille dans les limites de
+`tools/symboles_morts.py`, où les trois angles morts de l'audit sont écrits
+ensemble.
+
+**Nouveau — un test qui énumère les cas ne couvre que les cas énumérés.**
+`test_chaque_colonne_de_fait_declenche_une_revision` est paramétré sur trois
+colonnes. Il a l'air d'un test exhaustif — son nom dit « chaque » — et il en
+laissait dix sans garde. Le remède n'est pas d'allonger la liste, qui dériverait
+du schéma au premier ajout de colonne : c'est un test **structurel** qui dérive
+`COLONNES_DE_FAIT` du `PRAGMA table_info` moins une liste de colonnes de suivi
+écrite en clair. Ajouter une colonne au schéma sans la classer dans l'un des
+deux camps fait désormais échouer la suite — le classement devient une décision,
+plus un oubli.
+
+### Leçon générale : la mutation n'est pas une vérification, c'est l'écriture du test
+
+**C'est la mesure la plus importante du projet, parce qu'elle porte sur la
+méthode elle-même et non sur le produit.**
+
+Quatre paliers, quatre passes de mutation. Le chiffre qui compte est celui du
+**premier passage** — combien de mutations survivaient avant qu'on corrige quoi
+que ce soit :
+
+| Palier | Survivantes au 1ᵉʳ passage | Après correction |
+|---|---|---|
+| 1 — schéma et porte d'écriture | **2 / 10** | 0 |
+| 2 — lecture et recalcul | **0 / 14** | 0 |
+| 3 — job de collecte | **1 / 16** | 0 |
+| 4-5 — les deux journaux | **7 / 8** | 0 |
+
+**Attention au piège de lecture, qui est le piège signature de ce projet.** Ce
+tableau a d'abord été écrit « 0, 0, 0, 7 » — en comparant le chiffre *après
+correction* des trois premiers paliers au chiffre *de premier passage* du
+quatrième. Deux mesures différentes dans une même colonne. La série ci-dessus
+applique la même mesure aux quatre.
+
+**Ce qui a changé entre le palier 3 et le palier 4-5 n'est pas la difficulté du
+code, c'est l'ordre des opérations.** Aux paliers 1 à 3, la mutation était
+entrelacée avec l'écriture : on altérait l'implémentation à mesure qu'on
+écrivait le test, souvent *avant* d'écrire la ligne de production
+correspondante — le palier 3 bis en porte la trace explicite (« mutation faite
+avant d'écrire la moindre ligne »). Aux paliers 4 et 5, le code et les tests ont
+été écrits en entier, verts, et la passe de mutation est venue **ensuite**,
+comme une relecture.
+
+Sept sur huit. Le même auteur, la même suite, les mêmes règles déjà écrites dans
+ce fichier — et deux des sept trous relevaient de familles nommées dans ce
+document même. **Connaître la règle n'a pas suffi.**
+
+L'explication tient en une phrase : *un test écrit après un code vert est écrit
+pour confirmer ce que le code fait, pas pour interdire ce qu'il ne doit pas
+faire.* On regarde l'implémentation, on assertionne ce qu'on y voit, et on
+obtient un test qui décrit fidèlement le comportement courant — y compris ses
+défauts. La mutation, elle, pose l'autre question : *que faudrait-il casser pour
+que ce test rougisse ?* Posée pendant l'écriture, elle façonne l'assertion.
+Posée après, elle ne fait plus que compter les dégâts.
+
+**Règle de travail : aucune passe de mutation « finale ».** Chaque assertion
+non triviale se mute au moment où on l'écrit, avant de passer à la suivante. La
+passe globale reste utile — c'est elle qui a trouvé les sept — mais elle doit
+être un filet, pas la méthode. Quand elle rapporte beaucoup, ce n'est pas une
+bonne nouvelle sur sa propre efficacité : c'est le signal qu'on a écrit les
+tests dans le mauvais ordre.
+
+**Limite honnête de cette mesure.** Quatre points, des mutations choisies à la
+main, et un nombre de mutations qui varie d'un palier à l'autre (8 à 16) —
+ce n'est pas un protocole, c'est un faisceau. Il est écrit ici parce qu'aucune
+autre trace du projet ne dit si sa méthode marche, et qu'un faisceau mesuré
+vaut mieux qu'une conviction.
+
+### Étape 2 ✅ — `api.py`, la surface web
+
+Cinq routes, **126 lignes de code contre 172 pour `mcp_server`** : FastAPI
+absorbe nativement la validation que l'autre surface fait à la main.
+
+| Route | Rend |
+|---|---|
+| `GET /leads` | la sortie produit, même forme que `search_liquidity_events` |
+| `GET /evenements/{id}` | un cas, **écarté compris**, avec révisions et transitions |
+| `GET /collecte` | ce que la base sait, et quand elle a regardé |
+| `GET /sorties` | les cédants qui ont cessé, datés |
+| `POST /hypotheses` | le score d'une cession décrite à la main |
+
+**Aucune route ne touche au réseau.** Le job collecte, l'API relit. Une route
+d'enrichissement rouvrirait un appel API dans le temps de réponse — exactement
+ce que la base a été créée pour supprimer.
+
+**`127.0.0.1`, et ce n'est pas du confort.** Cette surface sert
+`cedant_denomination`, qui *est* un nom de personne sur ~20 % des cédants
+(contrainte 4). Le fichier SQLite vit déjà hors du dépôt pour cette raison ;
+l'exposer annulerait la décision d'un cran plus loin. `HOTE_DEFAUT` n'est pas
+surchargeable : le rendre configurable ferait de l'exposition un réglage.
+
+**Une connexion par requête.** Les connexions `sqlite3` ne traversent pas les
+threads et FastAPI exécute les routes synchrones dans un pool.
+
+#### Les trois tests qui ne peuvent exister qu'entre deux surfaces
+
+C'est la leçon du palier 2 — `motif_ecart_faits` comparé sur ses deux chemins —
+appliquée cette fois entre deux façades. **Aucun test d'une surface isolée ne
+peut voir une divergence :** chacune est verte avec son propre vocabulaire.
+
+1. **Les clés d'enveloppe, les motifs de refus et le breakdown** sont comparés
+   entre `/leads` et `search_liquidity_events` sur le même corpus. Les
+   *populations*, elles, ne sont jamais comparées — elles diffèrent par
+   construction et c'est documenté juste en dessous.
+2. **La provenance ne peut pas sortir de la porte unique.** Le contrôle porte
+   sur le **graphe d'appel** et non sur la réponse : une assertion sur la sortie
+   ne distingue pas un lead sérialisé d'un lead monté à la main qui lui
+   ressemble — c'est précisément le défaut de la Phase 3 bis. Un test lit l'AST
+   de `api.py` et vérifie qu'il n'importe pas `provenance` et n'appelle ni
+   `serialiser` ni `assembler`. L'analyse est syntaxique parce qu'une recherche
+   textuelle du mot interdirait d'en parler dans les commentaires.
+3. **`/hypotheses` et `score_lead` rendent la MÊME valeur**, pas la même forme.
+   La mise en forme a été extraite dans `models.presenter_evaluation` — elle
+   existait déjà en double entre `provenance.serialiser` et l'outil MCP, et une
+   troisième copie allait naître.
+
+**Sur cette surface, `provenance incomplete` est impossible par construction**,
+et c'est le schéma qui le garantit, pas la route : le `CHECK` du palier 1 refuse
+une URL non absolue à l'écriture. Prouvé plutôt que déduit — « devrait valoir
+zéro » est la formule qui a produit tous les défauts de ce projet.
+
+#### Un faux ami en test : substituer la dépendance de connexion
+
+La première version des tests substituait `api.connexion` par une connexion de
+fixture. Échec immédiat, et **pour la bonne raison** : `TestClient` exécute les
+routes dans un thread de travail, la connexion venait du thread du test, SQLite
+refuse. C'est exactement le bug que la dépendance évite en production.
+
+Le réflexe aurait été de contourner — et la dépendance, seule chose qui gère le
+cycle de vie des connexions, n'aurait jamais été exercée. Les tests passent donc
+par `FUNDORA_DB` et laissent tourner le vrai code.
+
+Les deux défauts trouvés en écrivant cette surface ont donné deux leçons
+générales, écrites plus bas : **le nombre de décisions plutôt que le nombre de
+lignes**, et **le défaut dont le symptôme est plausible**.
+
+#### L'enveloppe reste montée deux fois, et c'est délibéré
+
+`/leads` et `search_liquidity_events` construisent chacun leur dict de sept
+clés. Partager le constructeur exigerait de faire porter `departements`,
+`debut` et `fin` par `ResultatLecture` — trois champs traversant le cœur pour
+de la seule mise en forme, c'est-à-dire **l'inverse du mouvement de l'étape 1**,
+qui a fait descendre la logique du transport vers le cœur.
+
+Ce qui garde les deux enveloppes égales est le test de comparaison. Si une
+troisième surface arrive, **c'est le test qu'on étend, pas le modèle qu'on
+alourdit.**
+
+À ne pas confondre avec `presenter_evaluation`, extrait au même moment : là il
+s'agissait d'une *logique* de mise en forme dupliquée à l'identique, pas d'un
+contexte que chaque surface connaît déjà.
+
+#### `symboles_morts` gagne une quatrième justification
+
+L'audit signalait `Hypothese` — jamais construite par nous, seulement annotée.
+C'est FastAPI qui la construit à chaque requête, la même situation que
+`@serveur.tool` un cran plus loin : le framework construit non pas la fonction
+mais **son argument**.
+
+L'exemption est étroite et ne contredit pas la règle « une annotation n'est pas
+un usage » : ce qui justifie n'est pas l'annotation, c'est d'annoter le
+paramètre d'une fonction **enregistrée par un décorateur**. Sans enregistrement,
+l'annotation ne vaut toujours rien — et un décorateur *inerte* (`@cache`,
+`@dataclass`) ne compte pas davantage ici qu'ailleurs. Les deux moitiés sont
+testées, parce qu'une exemption dont on ne teste que le côté permissif finit par
+tout justifier.
+
+Coût assumé : une voie de plus vers le silence. L'alternative — inscrire
+`Hypothese` dans une liste blanche — fait grossir une liste que personne ne
+relit.
+
+#### Treize mutations, zéro survivante
+
+Écrites **pendant** les tests et non après, conformément à la leçon des paliers
+4-5. Huit sur les routes (clé d'enveloppe renommée, `montant_min` ignoré,
+compteurs de collecte non passés, `limite` ignorée, fenêtre ignorée,
+`/hypotheses` remontant sa propre mise en forme, 404 transformé en 200, `sorties`
+rendant toutes les bascules), une sur la porte de provenance (`classer` montant
+son dict à la main — neuf tests rougissent, dont ceux des deux surfaces), une
+sur le garde `siren`, deux sur la nouvelle règle de l'audit, une sur `api.py`
+important `provenance`.
+
+### Leçon générale : ce qui décide, c'est le nombre de décisions — pas le nombre de lignes
+
+**Règle de ce projet, en vigueur : dans une surface (`api.py`, `mcp_server.py`),
+une route ou un outil peut être long ; il ne peut pas décider.** On compte les
+branches, pas les lignes. La longueur reste utile — elle déclenche une
+relecture — mais elle ne rend plus de verdict.
+
+Le garde-fou précédent disait « si le corps d'une route dépasse une dizaine de
+lignes, c'est de la logique qui a quitté le cœur ». Il a été mesuré et retiré.
+
+Le cas qui l'a produit : **`GET /leads` fait 17 lignes et prend zéro décision.**
+
+| Route | Lignes | Décisions | Lignes de littéral dict |
+|---|---|---|---|
+| `leads` | 17 | **0** | 9 |
+| `evenement` | 14 | 5 | 8 |
+| `collecte` | 7 | 1 | 5 |
+| `sorties` | 6 | 2 | 5 |
+| `hypothese` | 1 | 0 | 0 |
+
+Trois affectations, un appel au cœur, une enveloppe de neuf lignes. Le seuil
+mesurait la **taille de la réponse**, ce qui n'a aucun rapport avec la question
+posée. Une route qui assemble un gros dict reste une route ; une route qui teste
+trois conditions commence à juger.
+
+**Ce que le seuil a quand même produit de bon** : il a forcé à regarder
+`evenement`, le seul à brancher — et c'est là qu'un vrai défaut attendait (voir
+la leçon suivante). Un mauvais critère qui déclenche la bonne relecture vaut
+mieux que pas de critère ; il ne vaut pas d'être conservé comme verdict.
+
+La règle générale derrière : **un proxy facile à mesurer se substitue à la
+propriété qu'on visait**, et il finit par être appliqué pour lui-même. C'est le
+mécanisme des six visages — « ce qui est facile à vérifier se substitue à ce qui
+compte » — appliqué cette fois non à une assertion mais à une règle de revue.
+
+### Leçon générale : un défaut dont le symptôme est plausible
+
+Trouvé en Phase 6 étape 2, sur une branche d'une seule ligne :
+
+```python
+"transitions": [_transition(t) for t in entrepot.transitions(base, siren=siren)]
+if siren
+else [],
+```
+
+Sans le `if siren`, `entrepot.transitions(base, siren=None)` **retire le
+filtre** et rend le journal entier. La fiche d'un événement sans cédant
+identifié afficherait donc les changements de statut de *toutes* les sociétés de
+la base, présentés comme les siens.
+
+**Ce n'est pas un des six visages.** Les six décrivent des tests aveugles — une
+assertion qui passe pour une raison sans rapport avec ce qu'elle prétend garder.
+Ici l'assertion manquait, simplement. Ce qui rend le cas intéressant est
+ailleurs : **la sortie fautive est plus crédible que la sortie correcte.**
+
+| | Ce que ça donne | Comment ça se lit |
+|---|---|---|
+| Comportement correct | `"transitions": []` | un champ vide — **se voit** |
+| Comportement fautif | trois transitions datées | un fait — **se lit** |
+
+Un champ vide interpelle : on se demande pourquoi. Un rattachement erroné ne
+demande rien, il informe. **Dans une fiche d'audit, une attribution fausse est
+pire qu'une absence**, parce que l'absence déclenche une vérification et que le
+faux fait la remplace.
+
+Deux conséquences de méthode :
+
+1. **Une API dont un paramètre absent signifie « tout » est un piège au point
+   d'appel.** `transitions(siren=None)` est légitime pour `/sorties`, qui veut
+   effectivement tout ; il est dangereux partout où le siren est optionnel. Le
+   garde appartient à l'appelant, et il doit être testé chez l'appelant.
+2. **Le corpus du test doit contenir de quoi être mal attribué.** Une base
+   sans aucune transition rendrait `[]` dans les deux cas — corpus dégénéré, une
+   fois de plus. Le test fait donc basculer une société *et* interroge un
+   événement sans siren : la version fautive rend une liste non vide, la
+   correcte rend `[]`.
+
+Le signal à surveiller, plus large que ce cas : **quand une valeur par défaut
+veut dire « pas de filtre », le mode dégradé n'est pas l'absence, c'est
+l'excès** — et l'excès ressemble à un résultat.
+
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
 **Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc
@@ -1257,6 +1747,46 @@ cette fois **entre deux surfaces** au lieu d'être à l'intérieur d'une seule.
 Elle est acceptable tant qu'elle est déclarée. Le jour où quelqu'un comparera
 un résultat MCP et un résultat web sans savoir ça, il conclura à un bug de
 scoring et cherchera au mauvais endroit.
+
+## Piège d'environnement : un `.pth` caché désactive l'installation éditable
+
+Rencontré le 2026-08-18 en vérifiant les commandes de lancement. Symptôme :
+
+```
+$ .venv/bin/fundora-prospect-collecte
+ModuleNotFoundError: No module named 'fundora_prospect'
+```
+
+alors que `pytest` passe et que le paquet est installé en éditable.
+
+**Cause.** L'install éditable dépose
+`site-packages/_editable_impl_fundora_prospect.pth`, qui contient le chemin de
+`src/`. Sous `~/Desktop`, quelque chose lui applique le flag macOS
+**`UF_HIDDEN`** — et `site.addpackage` **saute silencieusement les `.pth`
+cachés**. Aucun message, aucun avertissement : le chemin n'est simplement jamais
+ajouté à `sys.path`. Le flag revient après chaque réinstallation. Un venv créé
+dans `/private/tmp` n'a pas le problème.
+
+**Pourquoi ça n'a pas été vu plus tôt** — et c'est le vrai enseignement : les
+deux façons de lancer le projet contournaient le défaut sans le signaler.
+`pytest` a `pythonpath = ["src", "."]` dans `pyproject.toml`, et `demo.sh` force
+`PYTHONPATH` avec le commentaire « la démo n'a pas le droit de tomber devant un
+recruteur pour une histoire de sys.path ». **Deux contournements écrits par
+prudence ont masqué un environnement cassé pendant des semaines** — y compris
+pour `fundora-prospect-mcp`, le point d'entrée que `.mcp.json` référence.
+
+Un contournement défensif rend le chemin nominal non testé. C'est la même forme
+que le faux ami de la substitution de dépendance en Phase 6 : ce qui fait passer
+le test cache ce que le test devait prouver.
+
+**Réparation ponctuelle** — à refaire après chaque `pip install -e` :
+
+```sh
+chflags nohidden .venv/lib/python3.13/site-packages/*.pth
+```
+
+**Contournement fiable, et celui à donner** : `export PYTHONPATH="$PWD/src"`.
+Il fonctionne quel que soit l'état de l'installation.
 
 ## Si le temps manque
 

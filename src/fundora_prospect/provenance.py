@@ -43,6 +43,7 @@ from fundora_prospect.models import (
     LiquidityEvent,
     Provenance,
     TypeCedant,
+    presenter_contributions,
 )
 
 SOURCE = (
@@ -140,15 +141,7 @@ def serialiser(lead: Lead) -> dict[str, Any]:
         "code_ape": event.code_ape,
         "section_ape": event.section_ape,
         "url_publication": event.url_publication,
-        "breakdown": [
-            {
-                "critere": c.critere,
-                "points": c.points,
-                "poids": c.poids,
-                "motif": c.motif,
-            }
-            for c in lead.evaluation.contributions
-        ],
+        "breakdown": presenter_contributions(lead.evaluation),
         "provenance": {
             "source": lead.provenance.source,
             "base_legale": lead.provenance.base_legale,

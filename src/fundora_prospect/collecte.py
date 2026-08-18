@@ -48,7 +48,7 @@ from fundora_prospect.bodacc import rechercher as _rechercher_bodacc
 from fundora_prospect.enrichment import Enrichissement
 from fundora_prospect.enrichment import enrichir as _enrichir_entreprise
 from fundora_prospect.models import Evaluation, LiquidityEvent, StatutEntreprise
-from fundora_prospect.pipeline import _fenetre, repartir
+from fundora_prospect.pipeline import fenetre, normaliser_departements, repartir
 
 journal = logging.getLogger(__name__)
 
@@ -76,11 +76,29 @@ class ResultatCollecte:
     annonces_exploitables: int = 0
     sans_cedant_ou_illisibles: int = 0
     evenements_ecrits: int = 0
+    evenements_nouveaux: int = 0
     cedants_distincts: int = 0
     enrichissements: int = 0
     enrichissements_evites: int = 0
     plafond_atteint: bool = False
     incidents: list[str] = field(default_factory=list)
+
+    # Relus depuis les journaux, pas accumules en memoire. Un compteur tenu au
+    # vol dirait ce que le code CROIT avoir ecrit ; ces deux listes disent ce
+    # que la base contient reellement. C'est la meme regle que « un test
+    # alimente a la main ne prouve rien sur la production » : le seul controle
+    # qui vaille rebranche sur la vraie source.
+    transitions: list[entrepot.Transition] = field(default_factory=list)
+    revisions: list[entrepot.Revision] = field(default_factory=list)
+
+    @property
+    def sorties_du_flux(self) -> list[entrepot.Transition]:
+        """Les societes qui ont cesse pendant ce balayage.
+
+        Le signal metier du journal : ces leads ne disparaissent pas du
+        classement sans raison, ils en SORTENT, et on sait quel jour.
+        """
+        return [t for t in self.transitions if t.sortie_du_flux]
 
     @property
     def economie(self) -> float:
@@ -124,7 +142,7 @@ def balayer(
     Idempotent : relancer sur la meme fenetre met a jour, n'empile pas.
     """
     aujourdhui = aujourdhui or date.today()
-    debut = _fenetre(mois, aujourdhui)
+    debut = fenetre(mois, aujourdhui)
     lot = lot or f"{aujourdhui.isoformat()}-{'-'.join(departements)}"
 
     totaux = {
@@ -133,6 +151,7 @@ def balayer(
         "annonces_exploitables": 0,
         "sans_cedant_ou_illisibles": 0,
         "evenements_ecrits": 0,
+        "evenements_nouveaux": 0,
         "cedants_distincts": 0,
         "enrichissements": 0,
         "enrichissements_evites": 0,
@@ -194,6 +213,7 @@ def balayer(
         # Sans les ecartees, leur decompte par motif cesserait d'etre
         # recalculable et il faudrait une table pour le figer — qui deriverait.
         ecrits = 0
+        nouveaux = 0
         for annonce in annonces:
             event = LiquidityEvent.depuis_annonce(
                 annonce, par_siren.get(annonce.cedant.siren or "")
@@ -211,8 +231,9 @@ def balayer(
             except Exception as exc:  # provenance incomplete : URL absente
                 incidents.append(f"{annonce.id} : {type(exc).__name__}")
                 continue
-            entrepot.enregistrer(connexion, lead)
+            ecriture = entrepot.enregistrer(connexion, lead)
             ecrits += 1
+            nouveaux += ecriture.nouveau
 
         entrepot.terminer_collecte(
             connexion,
@@ -230,6 +251,7 @@ def balayer(
         totaux["annonces_exploitables"] += len(annonces)
         totaux["sans_cedant_ou_illisibles"] += recherche.non_exploitables
         totaux["evenements_ecrits"] += ecrits
+        totaux["evenements_nouveaux"] += nouveaux
         totaux["cedants_distincts"] += len(distincts)
         totaux["enrichissements"] += len(a_enrichir)
         # Ce qu'un « un appel par evenement » aurait emis en plus : la
@@ -254,5 +276,87 @@ def balayer(
         fin=aujourdhui,
         plafond_atteint=plafond_atteint,
         incidents=incidents,
+        # Relus depuis la base, et non accumules pendant la boucle : ce qui est
+        # rapporte est ce que la base contient, pas ce que le code pense y avoir
+        # mis. Les deux devraient coincider — c'est justement pour ca qu'il faut
+        # lire, sinon on ne le saurait jamais.
+        transitions=entrepot.transitions(connexion, depuis=aujourdhui),
+        revisions=entrepot.revisions(connexion, depuis=aujourdhui),
         **totaux,
     )
+
+
+def main(arguments: Sequence[str] | None = None) -> int:
+    """Point d'entree du job. `fundora-prospect-collecte --departements PACA`.
+
+    Le job doit etre lancable sans ecrire de Python : c'est un travail
+    periodique, il finira dans un `cron` ou un `launchd`, et une commande qui
+    n'existe pas ne se planifie pas.
+
+    Il ecrit sur la sortie ce qu'il a fait, y compris ce qu'il n'a PAS regarde.
+    Un balayage qui ne rapporte que ses succes laisse croire que le reste
+    n'existe pas — c'est le plafond de rapatriement compte comme la totalite,
+    deplace au niveau du terminal.
+    """
+    import argparse
+
+    analyseur = argparse.ArgumentParser(
+        prog="fundora-prospect-collecte",
+        description="Balaye le BODACC et ecrit en base. Aucun montant minimum : "
+        "le seuil est un filtre de LECTURE, l'appliquer ici obligerait a recollecter.",
+    )
+    analyseur.add_argument(
+        "--departements",
+        default="PACA",
+        help='Codes separes par des virgules, ou "PACA" (defaut).',
+    )
+    analyseur.add_argument("--mois", type=int, default=12, help="Fenetre glissante (defaut 12).")
+    analyseur.add_argument(
+        "--base", default=None, help="Chemin du fichier SQLite (defaut : $FUNDORA_DB)."
+    )
+    options = analyseur.parse_args(arguments)
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    connexion = entrepot.ouvrir(options.base)
+    try:
+        resultat = balayer(
+            connexion,
+            departements=normaliser_departements(options.departements),
+            mois=options.mois,
+        )
+    finally:
+        connexion.close()
+
+    print(f"\nlot {resultat.lot} — {resultat.debut} a {resultat.fin}")
+    print(
+        f"  {resultat.annonces_publiees} publiees, "
+        f"{resultat.annonces_rapatriees} rapatriees, "
+        f"{resultat.annonces_exploitables} exploitables, "
+        f"{resultat.sans_cedant_ou_illisibles} sans cedant ou illisibles"
+    )
+    print(
+        f"  {resultat.evenements_ecrits} evenements ecrits "
+        f"dont {resultat.evenements_nouveaux} nouveaux"
+    )
+    print(
+        f"  {resultat.enrichissements} appels pour {resultat.cedants_distincts} cedants "
+        f"distincts — {resultat.enrichissements_evites} evites ({resultat.economie:.0%})"
+    )
+    if resultat.transitions:
+        print(
+            f"  {len(resultat.transitions)} changements de statut, "
+            f"dont {len(resultat.sorties_du_flux)} sorties du flux"
+        )
+    if resultat.revisions:
+        print(f"  {len(resultat.revisions)} faits revises depuis la derniere collecte")
+    # Les reserves ne s'affichent que quand elles MORDENT : une mise en garde
+    # permanente cesse d'etre lue.
+    if resultat.plafond_atteint:
+        print(f"  ATTENTION : plafond de {PLAFOND_BALAYAGE} atteint, des annonces non lues")
+    for incident in resultat.incidents:
+        print(f"  incident : {incident}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

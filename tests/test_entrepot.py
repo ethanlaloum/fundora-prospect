@@ -457,6 +457,42 @@ def test_la_lecture_filtre_par_departement(base_contrastee: sqlite3.Connection) 
     assert entrepot.evenements(base_contrastee, departements=["06"]) == []
 
 
+def test_la_lecture_filtre_par_identifiant(base_contrastee: sqlite3.Connection) -> None:
+    """Un fait precis, pour la route d'audit d'un cas isole.
+
+    Le corpus en porte six : demander `PM-CESSEE` doit en rendre UN, et le bon.
+    Asserter la seule longueur laisserait passer un filtre qui rend n'importe
+    quelle ligne unique — c'est la difference entre « la structure a la bonne
+    taille » et « elle dit la bonne chose ».
+    """
+    trouves = entrepot.evenements(base_contrastee, evenement_id="PM-CESSEE")
+    assert [s.event.id for s in trouves] == ["PM-CESSEE"]
+    assert trouves[0].event.statut_cedant is StatutEntreprise.CESSEE
+
+
+def test_un_identifiant_inconnu_rend_une_liste_vide(
+    base_contrastee: sqlite3.Connection,
+) -> None:
+    """Pas d'exception : l'absence est un resultat, pas une erreur. C'est a la
+    route de decider qu'elle vaut 404 — le stockage ne juge pas."""
+    assert entrepot.evenements(base_contrastee, evenement_id="JAMAIS-VU") == []
+
+
+def test_le_filtre_par_identifiant_rend_AUSSI_un_ecarte(
+    base_contrastee: sqlite3.Connection,
+) -> None:
+    """**La raison d'etre de ce filtre.**
+
+    `/leads` ne rend jamais un ecarte, par construction. La route d'audit d'un
+    cas isole est le seul endroit ou l'on peut demander « et celui-la, pourquoi
+    a-t-il ete refuse ? ». Si la lecture par identifiant excluait les ecartes,
+    elle repondrait « inconnu » a la seule question qu'on lui pose.
+    """
+    apport = entrepot.evenements(base_contrastee, evenement_id="APPORT")
+    assert [s.event.id for s in apport] == ["APPORT"]
+    assert apport[0].event.retenu is False
+
+
 def test_la_lecture_ne_filtre_pas_sur_le_montant(base_contrastee: sqlite3.Connection) -> None:
     """Le seuil est un critere commercial : il appartient au classement, et il
     porte un motif de refus qui doit etre compte. Le sortir en SQL ferait

@@ -131,8 +131,19 @@ def normaliser_departements(brut: Any) -> list[str]:
     return codes
 
 
-def _fenetre(mois: int, aujourdhui: date) -> date:
-    """Premier jour du mois situe `mois` mois en arriere."""
+def fenetre(mois: int, aujourdhui: date) -> date:
+    """Premier jour du mois situe `mois` mois en arriere.
+
+    Publique, et elle a mis trois modules a le devenir. `collecte` l'importait
+    deja sous son ancien nom `_fenetre` ; `api` en a besoin pour la meme
+    raison — traduire les `mois` d'une requete en dates. **Un symbole prive
+    importe par plus d'un module n'est plus prive**, il est juste mal nomme, et
+    le soulignement finit par faire croire a une frontiere qui n'existe pas.
+
+    C'est le seul cas du depot. Verifie : les autres imports qui ressemblent a
+    des symboles prives (`rechercher as _rechercher_bodacc`) vont dans l'autre
+    sens — un symbole public aliase vers un nom local, ce qui n'expose rien.
+    """
     return date(
         aujourdhui.year - (mois // 12) - (1 if aujourdhui.month <= mois % 12 else 0),
         ((aujourdhui.month - mois - 1) % 12) + 1,
@@ -431,7 +442,7 @@ def executer(
     lui, ni le pipeline ni ses tests ne seraient reproductibles.
     """
     aujourdhui = aujourdhui or date.today()
-    debut = _fenetre(mois, aujourdhui)
+    debut = fenetre(mois, aujourdhui)
 
     recherche = rechercher(
         departements=list(departements),
