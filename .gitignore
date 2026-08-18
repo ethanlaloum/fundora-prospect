@@ -15,6 +15,14 @@ out/
 .cache/
 explore/out/
 
+# Base de l'entrepot. Elle vit hors du depot par defaut
+# (~/.cache/fundora-prospect/prospects.db), mais FUNDORA_DB permet de la poser
+# n'importe ou — y compris ici par commodite. Filet, pas garantie : la garantie
+# est le defaut de `entrepot.chemin_base()`, verrouille par un test.
+*.db
+*.db-journal
+*.db-wal
+
 # Reglages Claude Code locaux (machine-specifiques)
 .claude/settings.local.json
 

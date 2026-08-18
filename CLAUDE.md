@@ -1093,6 +1093,39 @@ paramètre.** Le coût est nul et l'élargissement débloquera le critère
 département, laissé à poids nul avec la mention « prêt à servir si le périmètre
 s'élargit ».
 
+### Palier 1 ✅ — le schéma et la porte d'écriture
+
+`entrepot.py` : `evenement` et `cedant`, `ouvrir`, `enregistrer`.
+
+**Le verrou de la contrainte 3 survit au passage en base, et il en faut deux.**
+`enregistrer` n'accepte qu'un `Lead` — même contrôle de type que
+`provenance.serialiser`, pour la même raison. Mais une table est un second
+chemin de sortie, et un `INSERT` écrit dans six mois ne demande la permission à
+personne : les `CHECK` du schéma refusent une ligne intraçable **même en SQL
+direct**. C'est le seul barrage qui protège du code pas encore écrit, exactement
+comme `TransportWhitelist` au niveau réseau.
+
+Les tests qui l'exercent écrivent donc du SQL à la main, littéralement ce que
+ferait un futur distrait.
+
+**On ne crée que ce qu'on utilise.** `collecte`, `cedant_journal` et
+`evenement_revision` arrivent avec les paliers qui les lisent. Une table créée
+d'avance est de la structure morte, et l'audit ne voit ni les tables ni les
+colonnes. D'où `VERSION_SCHEMA` et une migration par palier.
+
+Dix mutations, **zéro survivante** — après correction de deux trous que le
+premier passage avait révélés :
+
+- **`premiere_collecte`** était asserté sur deux collectes **à la même date**.
+  Les trois colonnes de date y valaient le même jour : le test était vert quelle
+  que soit celle qu'on lui donnait. Corpus dégénéré, rencontré la semaine même
+  où la règle a été écrite plus haut — la connaître ne suffit pas, il faut la
+  vérifier par mutation.
+- **`PRAGMA foreign_keys = ON`** n'était gardé par rien. SQLite n'applique pas
+  les clés étrangères par défaut : une contrainte déclarée mais désactivée est
+  une garantie qui n'existe que sur le papier, et rien ne la distingue d'une
+  garantie réelle à la lecture du schéma.
+
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
 **Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc
