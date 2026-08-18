@@ -41,18 +41,24 @@ deterministe, `aujourdhui` en parametre.
 
 ## On ne cree que ce qu'on utilise
 
-Le schema de ce palier porte `evenement` et `cedant`, rien d'autre. Les tables
-`collecte`, `cedant_journal` et `evenement_revision` arrivent avec les paliers
-qui les lisent. Une table creee d'avance est de la structure morte, et
-`tools/symboles_morts.py` ne voit ni les tables ni les colonnes — il audite les
-symboles. D'ou `VERSION_SCHEMA` et une migration explicite a chaque palier.
+Le schema porte `evenement`, `cedant` et `collecte`. `cedant_journal` et
+`evenement_revision` arrivent avec les paliers qui les lisent. Une table creee
+d'avance est de la structure morte, et `tools/symboles_morts.py` ne voit ni les
+tables ni les colonnes — il audite les symboles. D'ou `VERSION_SCHEMA`.
+
+**`collecte_ecart` n'existe pas, et c'est deliberé.** Les annonces ecartees
+sont stockees : leur decompte par motif se RECALCULE depuis `evenement` par la
+meme `motif_ecart_faits` que partout ailleurs. Une table qui le dupliquerait
+deriverait le jour ou un motif est renomme — la lecon « un parametre recopie
+derive de sa source », appliquee a une table. Ne sont stockes que les quatre
+nombres qu'aucune relecture ne peut retrouver.
 """
 
 from __future__ import annotations
 
 import os
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -66,7 +72,18 @@ from fundora_prospect.models import (
 
 VARIABLE_BASE = "FUNDORA_DB"
 
-VERSION_SCHEMA = 1
+# 1 : evenement + cedant. 2 : collecte.
+#
+# Les ajouts sont purement additifs et le schema est ecrit en `IF NOT EXISTS` :
+# ouvrir une base v1 cree la table manquante et rien d'autre. Le numero sert a
+# constater ou on en est, pas a piloter une sequence de scripts — le jour ou une
+# migration devra transformer des donnees existantes, elle ne pourra plus etre
+# implicite, et ce numero sera ce qui permet de la declencher.
+VERSION_SCHEMA = 2
+
+# Un statut se perime ; une annonce, non. On resonde donc les societes ACTIVES
+# passe ce delai.
+TTL_ENRICHISSEMENT_JOURS = 30
 
 # Vocabulaires fermes, repris des StrEnum du domaine. Les figer dans le schema
 # est ce qui rend la base relisible sans le code : une valeur hors liste
@@ -130,6 +147,40 @@ CREATE TABLE IF NOT EXISTS evenement (
 CREATE INDEX IF NOT EXISTS idx_evenement_recherche
     ON evenement (departement, retenu, date_parution);
 CREATE INDEX IF NOT EXISTS idx_evenement_cedant ON evenement (cedant_siren);
+
+-- Les compteurs de population : dates, et par (balayage, departement).
+--
+-- Cette table ne porte QUE ce qui n'est pas recalculable depuis `evenement`.
+-- Le decompte des ecartes par motif n'y est pas : les annonces ecartees sont
+-- stockees, donc leurs motifs se recalculent par `motif_ecart_faits`. Une
+-- colonne qui les dupliquerait deriverait le jour ou un motif est renomme.
+--
+-- Restent quatre nombres qu'aucune relecture ne peut retrouver : ce que le
+-- BODACC declarait contenir, ce qu'on en a rapatrie, ce que le plafond a
+-- coupe, et les annonces sans cedant — ecartees avant d'avoir un `id`, donc
+-- sans ligne ou etre comptees.
+CREATE TABLE IF NOT EXISTS collecte (
+    id                        INTEGER PRIMARY KEY,
+    lot                       TEXT NOT NULL,
+    departement               TEXT NOT NULL,
+    fenetre_debut             TEXT NOT NULL,
+    fenetre_fin               TEXT NOT NULL,
+    lancee_a                  TEXT NOT NULL,
+
+    -- NULL tant que le balayage n'est pas alle au bout. Un balayage interrompu
+    -- laisse donc une trace qui se declare comme telle, au lieu de laisser
+    -- croire a des compteurs complets.
+    terminee_a                TEXT,
+
+    annonces_publiees         INTEGER NOT NULL DEFAULT 0,
+    annonces_rapatriees       INTEGER NOT NULL DEFAULT 0,
+    annonces_exploitables     INTEGER NOT NULL DEFAULT 0,
+    sans_cedant_ou_illisibles INTEGER NOT NULL DEFAULT 0,
+    plafond_atteint           INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_collecte_departement
+    ON collecte (departement, lancee_a DESC);
 """
 
 
@@ -357,3 +408,182 @@ def evenements(
         )
         for ligne in lignes
     ]
+
+
+# --- Le TTL d'enrichissement ---------------------------------------------------
+
+
+def sirens_a_enrichir(
+    connexion: sqlite3.Connection,
+    sirens: Iterable[str],
+    *,
+    aujourdhui: date,
+    ttl_jours: int = TTL_ENRICHISSEMENT_JOURS,
+) -> list[str]:
+    """Parmi ces SIREN, ceux qui meritent un appel API. **Le gain du design.**
+
+    Trois regles, dans cet ordre :
+
+    1. **Jamais vu** -> a enrichir. C'est le cas nominal d'une premiere
+       collecte.
+    2. **Societe CESSEE** -> jamais resondee, quel que soit son age. Une
+       personne morale radiee ne redevient pas active : le sondage serait un
+       appel API garanti sans information. C'est une regle metier, pas une
+       optimisation — et elle est verrouillee par un test, parce qu'une regle
+       qui ne vit que dans un commentaire n'est qu'une affirmation.
+    3. **Vu il y a plus de `ttl_jours`** -> a resonder. Un statut se perime,
+       une annonce non : c'est le seul champ de l'enrichissement qui bouge.
+
+    Le reste — actives vues recemment, statuts inconnus vus recemment — est
+    laisse tranquille.
+
+    L'ordre du resultat suit celui de l'entree, dedoublonne. Le job en depend
+    pour rester reproductible.
+    """
+    demandes: list[str] = []
+    for siren in sirens:
+        if siren and siren not in demandes:
+            demandes.append(siren)
+    if not demandes:
+        return []
+
+    connus = {
+        ligne["siren"]: (ligne["statut"], ligne["enrichi_a"])
+        for ligne in connexion.execute(
+            f"SELECT siren, statut, enrichi_a FROM cedant "
+            f"WHERE siren IN ({', '.join('?' * len(demandes))})",
+            demandes,
+        )
+    }
+
+    a_faire: list[str] = []
+    for siren in demandes:
+        if siren not in connus:
+            a_faire.append(siren)
+            continue
+        statut, enrichi_a = connus[siren]
+        if statut == str(StatutEntreprise.CESSEE):
+            continue
+        if (aujourdhui - date.fromisoformat(enrichi_a)).days >= ttl_jours:
+            a_faire.append(siren)
+    return a_faire
+
+
+def enrichissements_connus(
+    connexion: sqlite3.Connection, sirens: Iterable[str]
+) -> dict[str, sqlite3.Row]:
+    """Ce que la base sait deja de ces societes, pour les SIREN qu'on ne
+    resonde pas. Sans ca, un lead non resonde perdrait son statut a la
+    reecriture — la ligne `cedant` est mise a jour depuis le `Lead`."""
+    demandes = [s for s in dict.fromkeys(sirens) if s]
+    if not demandes:
+        return {}
+    return {
+        ligne["siren"]: ligne
+        for ligne in connexion.execute(
+            f"SELECT * FROM cedant WHERE siren IN ({', '.join('?' * len(demandes))})",
+            demandes,
+        )
+    }
+
+
+# --- Les compteurs de collecte -------------------------------------------------
+
+
+def demarrer_collecte(
+    connexion: sqlite3.Connection,
+    *,
+    lot: str,
+    departement: str,
+    fenetre_debut: date,
+    fenetre_fin: date,
+    lancee_a: date,
+) -> int:
+    """Ouvre une ligne de collecte, `terminee_a` a NULL.
+
+    La ligne est ecrite AVANT le travail, pas apres. Un balayage interrompu
+    laisse ainsi une trace qui se declare incomplete ; s'il n'ecrivait qu'a la
+    fin, une interruption serait indistinguable d'un balayage jamais lance.
+    """
+    curseur = connexion.execute(
+        "INSERT INTO collecte (lot, departement, fenetre_debut, fenetre_fin, lancee_a) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (lot, departement, fenetre_debut.isoformat(), fenetre_fin.isoformat(),
+         lancee_a.isoformat()),
+    )
+    connexion.commit()
+    return int(curseur.lastrowid or 0)
+
+
+def terminer_collecte(
+    connexion: sqlite3.Connection,
+    identifiant: int,
+    *,
+    terminee_a: date,
+    annonces_publiees: int,
+    annonces_rapatriees: int,
+    annonces_exploitables: int,
+    sans_cedant_ou_illisibles: int,
+    plafond_atteint: bool,
+) -> None:
+    """Ferme la ligne. C'est `terminee_a` qui fait passer les compteurs du
+    statut « partiels » a « complets »."""
+    connexion.execute(
+        "UPDATE collecte SET terminee_a = ?, annonces_publiees = ?, "
+        "annonces_rapatriees = ?, annonces_exploitables = ?, "
+        "sans_cedant_ou_illisibles = ?, plafond_atteint = ? WHERE id = ?",
+        (
+            terminee_a.isoformat(),
+            annonces_publiees,
+            annonces_rapatriees,
+            annonces_exploitables,
+            sans_cedant_ou_illisibles,
+            int(plafond_atteint),
+            identifiant,
+        ),
+    )
+    connexion.commit()
+
+
+def compteurs_de_collecte(
+    connexion: sqlite3.Connection, *, departements: Sequence[str] | None = None
+) -> dict[str, object] | None:
+    """Ce que la derniere collecte de chaque departement a vu. `None` si aucune.
+
+    **La derniere par departement, pas la somme de toutes.** Le job tourne
+    periodiquement : additionner les passages compterait plusieurs fois les
+    memes annonces publiees, et le total gonflerait a chaque execution sans que
+    rien n'ait change dans la source.
+
+    `collecte_partielle` est vrai des qu'une des lignes retenues n'a pas de
+    `terminee_a`. Les compteurs sont alors ceux d'un balayage coupe au milieu :
+    ils sous-estiment, et le resume doit le dire. C'est le meme defaut que le
+    plafond de rapatriement compte comme la totalite — un sous-ensemble presente
+    comme un total.
+    """
+    requete = (
+        "SELECT * FROM collecte c1 WHERE c1.id = ("
+        "  SELECT c2.id FROM collecte c2 WHERE c2.departement = c1.departement"
+        "  ORDER BY c2.lancee_a DESC, c2.id DESC LIMIT 1"
+        ")"
+    )
+    parametres: list[object] = []
+    if departements:
+        requete += f" AND c1.departement IN ({', '.join('?' * len(departements))})"
+        parametres.extend(departements)
+
+    lignes = connexion.execute(requete, parametres).fetchall()
+    if not lignes:
+        return None
+
+    def total(colonne: str) -> int:
+        return sum(ligne[colonne] for ligne in lignes)
+
+    return {
+        "annonces_publiees": total("annonces_publiees"),
+        "annonces_rapatriees": total("annonces_rapatriees"),
+        "annonces_exploitables": total("annonces_exploitables"),
+        "sans_cedant_ou_illisibles": total("sans_cedant_ou_illisibles"),
+        "plafond_atteint": any(ligne["plafond_atteint"] for ligne in lignes),
+        "collecte_partielle": any(ligne["terminee_a"] is None for ligne in lignes),
+    }

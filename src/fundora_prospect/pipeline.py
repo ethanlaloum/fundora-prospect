@@ -161,7 +161,14 @@ def resumer(stats: dict[str, Any]) -> str:
     et c'est precisement pour ca qu'elles ne doivent pas etre redigees a deux
     endroits. Les fragments changent, l'assemblage est unique.
     """
-    en_direct = "annonces_publiees" in stats
+    # DEUX axes independants, et non un seul « en direct ou non ». La lecture
+    # peut tres bien connaitre ce que la source contenait — le job de collecte
+    # le lui fournit — sans pour autant avoir les compteurs de budget
+    # d'enrichissement, qui n'existent que sur le chemin direct. Les confondre
+    # ferait chercher `enrichis` dans un dict qui ne l'a pas.
+    source_connue = "annonces_publiees" in stats
+    budget_d_enrichissement = "classables_parmi_les_enrichis" in stats
+
     morceaux: list[str] = []
     reserves: list[str] = []
 
@@ -169,7 +176,7 @@ def resumer(stats: dict[str, Any]) -> str:
     #
     # Les reserves n'apparaissent que quand elles mordent : une mise en garde
     # affichee en permanence cesse d'etre lue.
-    if en_direct:
+    if source_connue:
         morceaux.append(f"{stats['annonces_publiees']} annonces publiees")
         if stats["plafond_atteint"]:
             morceaux.append(
@@ -188,19 +195,27 @@ def resumer(stats: dict[str, Any]) -> str:
             "collecte enregistre pour cette recherche"
         )
 
+    # Un balayage coupe au milieu a bien ecrit sa ligne, mais ses compteurs
+    # sous-estiment. Les presenter sans reserve serait le defaut du plafond de
+    # rapatriement compte comme la totalite, deplace d'un cran.
+    if stats.get("collecte_partielle"):
+        reserves.append(
+            "la derniere collecte n'est pas allee au bout : les compteurs de "
+            "population sous-estiment ce que la source contenait"
+        )
+
     # --- Ce que la grille en a fait
     #
     # Le chiffre porte sa condition d'obtention DANS la meme phrase. Elle n'est
     # pas la meme des deux cotes : en direct la grille ne voit que les dossiers
     # ENRICHIS, en base elle voit tous les CANDIDATS.
-    if en_direct:
+    if budget_d_enrichissement:
         classables = stats["classables_parmi_les_enrichis"]
-        morceaux.append(f"{classables} classables parmi les {stats['enrichis']} enrichis")
         portee = f"classables parmi les {stats['enrichis']} enrichis"
     else:
         classables = stats["classables"]
-        morceaux.append(f"{classables} classables sur {stats['candidats']} candidats")
         portee = f"classables sur {stats['candidats']} candidats"
+    morceaux.append(f"{classables} {portee}")
 
     morceaux += [f"{n} {motif}" for motif, n in stats["ecartes"].items()]
     resume = ", ".join(morceaux) + "."

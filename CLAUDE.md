@@ -1177,6 +1177,56 @@ tests aveugles sur ce projet.
 
 Quatorze mutations, **zéro survivante**.
 
+### Palier 3 ✅ — le job de collecte
+
+`collecte.py` : `balayer(connexion, departements=PACA, mois=12, …)`, avec
+`rechercher` et `enrichir` en paramètres comme partout ailleurs dans le cœur.
+Schéma v2 : la table `collecte`.
+
+**Le TTL n'est plus une affirmation.** Trois règles, trois tests :
+un SIREN jamais vu est enrichi ; une active de plus de 30 jours est resondée ;
+une cessée ne l'est **jamais**, quel que soit son âge. Ce dernier test est
+paramétré de 0 à 5 000 jours **de part et d'autre du seuil** — une cessée
+fraîche seule serait verte même si c'était le délai, et non le statut, qui la
+protégeait. Corpus dégénéré appliqué à un paramètre.
+
+**`collecte_ecart` n'a pas été créée**, contrairement au schéma proposé. C'était
+une erreur de ma conception initiale : depuis le palier 1 on stocke les annonces
+écartées, donc leur décompte par motif se **recalcule** depuis `evenement` par
+la même `motif_ecart_faits`. Une table qui le figerait dériverait au premier
+renommage de motif. Ne sont stockés que les quatre nombres qu'aucune relecture
+ne peut retrouver : `annonces_publiees`, `annonces_rapatriees`,
+`sans_cedant_ou_illisibles`, `plafond_atteint`.
+
+**La ligne de collecte est écrite AVANT le travail**, `terminee_a` à NULL. Un
+balayage coupé laisse donc une trace qui se déclare incomplète, et le résumé le
+répercute. S'il n'écrivait qu'à la fin, une interruption serait indistinguable
+d'un balayage jamais lancé — et les compteurs du passage précédent seraient
+servis comme s'ils étaient à jour. C'est le plafond de rapatriement compté comme
+la totalité, déplacé d'un cran.
+
+**`compteurs_de_collecte` retient la dernière ligne par département, pas la
+somme.** Le job tourne périodiquement : additionner les passages compterait
+plusieurs fois les mêmes annonces publiées, et le total gonflerait à chaque
+exécution sans que rien n'ait changé dans la source.
+
+**`resumer` branche désormais sur deux axes indépendants** — la source est-elle
+connue, et y a-t-il un budget d'enrichissement — au lieu d'un seul « en direct
+ou non ». La lecture peut très bien connaître ce que la source contenait sans
+avoir les compteurs de budget, qui n'existent que sur le chemin direct. Un test
+du palier 2 encodait cette confusion en fabriquant un dict `collecte` contenant
+`enrichis` : il passait, mais décrivait une source qui n'existe pas. **Un test
+qui fabrique son entrée finit par valider un contrat que personne n'honore.**
+
+Seize mutations, **zéro survivante** — après correction d'un trou. La mutation
+« le job n'a plus de déduplication par SIREN » a d'abord survécu, et elle a
+révélé autre chose qu'un test manquant : **le dédoublonnage du job est redondant
+avec celui de `sirens_a_enrichir`**. Le retirer ne change aucun appel API. Son
+seul effet observable portait sur `cedants_distincts`, qui n'était asserté nulle
+part et annonçait alors 10 sociétés là où il n'y en a qu'une. Les deux lignes se
+ressemblent et ont deux rôles : l'une évite des appels, l'autre nomme une
+grandeur. Un commentaire le dit, pour qu'aucune relecture n'en « simplifie » une.
+
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
 **Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc

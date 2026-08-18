@@ -393,7 +393,15 @@ def test_le_resume_de_lecture_dit_qu_il_ignore_l_etendue_de_la_collecte() -> Non
 
 def test_quand_les_compteurs_de_collecte_existent_la_reserve_disparait() -> None:
     """Une mise en garde affichee en permanence cesse d'etre lue : elle ne
-    s'affiche que quand elle mord. Le job du palier 3 fournira ces compteurs."""
+    s'affiche que quand elle mord.
+
+    Le dict passe ici porte EXACTEMENT ce que `entrepot.compteurs_de_collecte`
+    rend — ni plus, ni moins. Une version anterieure y ajoutait `enrichis` et
+    `classables_parmi_les_enrichis`, qui n'existent que sur le chemin direct :
+    le test passait, mais il decrivait une source qui n'existe pas. Un test qui
+    fabrique son entree finit par valider un contrat que personne n'honore.
+    `tests/test_collecte.py` exerce le meme chemin avec la vraie table.
+    """
     resultat = lire(
         [stocke("C", 400_000, 10)],
         collecte={
@@ -402,10 +410,12 @@ def test_quand_les_compteurs_de_collecte_existent_la_reserve_disparait() -> None
             "annonces_exploitables": 1,
             "sans_cedant_ou_illisibles": 0,
             "plafond_atteint": False,
-            "classables_parmi_les_enrichis": 1,
-            "enrichis": 1,
+            "collecte_partielle": False,
         },
     )
     resume = resumer(resultat.statistiques)
     assert "662 annonces publiees" in resume
     assert "l'etendue de la collecte" not in resume
+    # Le referent reste celui de la lecture : la grille a vu tous les
+    # candidats, pas un budget d'enrichis.
+    assert "1 classables sur 1 candidats" in resume
