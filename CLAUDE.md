@@ -550,6 +550,34 @@ Deux règles apprises en écrivant l'outil :
   qui crie au loup est désactivé dans la semaine.** Le biais va donc vers le
   silence — il peut manquer un mort, il ne doit pas en inventer.
 
+#### La limite de l'outil : il voit des symboles, pas des expressions
+
+Trouvée en Phase 6, par un cas concret. `provenance.base_legale` s'écrit :
+
+```python
+return BASES_LEGALES.get(type_cedant, BASES_LEGALES[TypeCedant.INCONNU])
+```
+
+Ce repli **ne peut jamais tirer** : les trois membres de `TypeCedant` sont tous
+des clés de `BASES_LEGALES`. C'est du code mort, et l'audit ne le voit pas.
+
+Ce n'est pas un défaut de l'implémentation, c'est son périmètre : `collecter`
+ne ramasse que les `ClassDef` et `FunctionDef` de **premier niveau** dans
+`src/`. Une branche morte à l'intérieur d'une fonction, un argument par défaut
+inatteignable, une clause `else` que rien ne peut atteindre — rien de tout cela
+n'est un symbole, donc rien de tout cela n'est audité.
+
+**On ne corrige pas l'outil.** Détecter du code inatteignable demande une
+analyse de flux, pas une lecture de noms : c'est un autre outil, avec un autre
+taux de faux positifs, et la règle « un audit qui crie au loup est désactivé
+dans la semaine » s'appliquerait immédiatement. La limite est écrite ici pour
+qu'on sache où l'audit s'arrête, pas pour être comblée.
+
+Ce que ça implique en pratique : **une mutation qui survit ne prouve pas
+toujours un trou de test.** Elle peut porter sur du code que rien n'atteint. Il
+faut vérifier laquelle des deux avant de conclure — sinon on écrit un test pour
+garder une ligne qui ne s'exécute jamais.
+
 ### Leçon générale : vérifier qu'une chose existe n'est pas vérifier ce qu'elle dit
 
 Découvert en Phase 6 en extrayant `motif_ecart`. Avant d'écrire la moindre
@@ -619,24 +647,41 @@ non vide la viole tout en passant le test. Les nouveaux tests exigent donc les
 nombres qui permettent de recalculer : le montant d'entrée et ses deux bornes,
 le nombre de jours et la forme de la décroissance.
 
-Le quatrième trou est d'une autre nature et vaut d'être noté à part.
+Le cas `base_legale` n'est pas un trou de test du tout : la mutation survit
+parce que le code est **inatteignable**. Voir la limite de
+`tools/symboles_morts.py`, plus haut — l'audit voit des symboles, pas des
+expressions.
 
-Le cas `base_legale` mérite sa nuance : les trois membres de `TypeCedant` sont
-tous des clés de `BASES_LEGALES`, donc le défaut de `.get()` ne se déclenche
-jamais. La mutation survit parce que le code est **mort**, pas parce que le
-test est aveugle — le cas atteignable, lui, est couvert. Et
-`tools/symboles_morts.py` ne le voit pas : c'est une expression, pas un
-symbole. L'audit du code mort s'arrête aux définitions de premier niveau.
+#### Le quatrième trou est d'une autre famille : ce n'est pas l'assertion, c'est le corpus
 
-`annonces_exploitables` n'était asserté que sur un corpus où *toutes* les
-annonces étaient des candidates. Les deux grandeurs y sont égales, donc le test
-ne pouvait pas les distinguer — il était vert quelle que soit celle qu'on lui
-donnait. **Un test qui ne peut pas distinguer deux valeurs ne garde ni l'une ni
-l'autre**, et il faut construire le cas où elles diffèrent pour le savoir : ici
-un corpus contenant des apports, exploitables mais jamais candidats.
+Les trois premiers viennent d'une assertion trop faible. Celui-ci vient d'une
+assertion **juste**, appliquée à un jeu de données qui ne pouvait pas la mettre
+en défaut.
 
-Les quatre trous ont été fermés, et les quatre mutations sont rejouées vertes
-— c'est-à-dire rouges. La suite passe de 446 à 450 tests.
+`annonces_exploitables` était asserté par `assert stats["annonces_exploitables"]
+== 3`, ce qui est une assertion de contenu en bonne et due forme. Mais le corpus
+du test contenait trois annonces qui étaient **toutes** des candidates. Sur ce
+jeu-là, `len(annonces)` et `len(candidats)` valent tous les deux 3 : le test
+était vert quelle que soit celle des deux qu'on lui donnait. Il n'a jamais rien
+gardé.
+
+**Règle : un test qui ne peut pas distinguer deux valeurs n'en garde aucune.
+Le corpus doit être choisi pour qu'elles diffèrent.** Ici il fallait des
+annonces exploitables mais jamais candidates — des apports, qui existent en
+quantité dans le flux réel.
+
+C'est une famille distincte parce que le remède est distinct. Contre une
+assertion faible, on renforce l'assertion. Contre un corpus dégénéré, renforcer
+l'assertion ne sert à rien : il faut construire le cas où les deux grandeurs se
+séparent. Et rien dans la lecture du test ne signale le problème — l'assertion
+est spécifique, le nombre est exact, tout a l'air rigoureux.
+
+La question à se poser devant tout test de compteur : **existe-t-il, dans ce
+corpus, une autre grandeur qui vaudrait le même nombre ?** Si oui, le test ne
+départage pas.
+
+Les quatre trous ont été fermés, et les quatre mutations sont rejouées : quatre
+détectées. La suite passe de 446 à 450 tests.
 
 ### Leçon générale : un tri en amont est un filtre
 
