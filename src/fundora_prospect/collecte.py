@@ -48,7 +48,7 @@ from fundora_prospect.bodacc import rechercher as _rechercher_bodacc
 from fundora_prospect.enrichment import Enrichissement
 from fundora_prospect.enrichment import enrichir as _enrichir_entreprise
 from fundora_prospect.models import Evaluation, LiquidityEvent, StatutEntreprise
-from fundora_prospect.pipeline import fenetre, repartir
+from fundora_prospect.pipeline import fenetre, normaliser_departements, repartir
 
 journal = logging.getLogger(__name__)
 
@@ -284,3 +284,79 @@ def balayer(
         revisions=entrepot.revisions(connexion, depuis=aujourdhui),
         **totaux,
     )
+
+
+def main(arguments: Sequence[str] | None = None) -> int:
+    """Point d'entree du job. `fundora-prospect-collecte --departements PACA`.
+
+    Le job doit etre lancable sans ecrire de Python : c'est un travail
+    periodique, il finira dans un `cron` ou un `launchd`, et une commande qui
+    n'existe pas ne se planifie pas.
+
+    Il ecrit sur la sortie ce qu'il a fait, y compris ce qu'il n'a PAS regarde.
+    Un balayage qui ne rapporte que ses succes laisse croire que le reste
+    n'existe pas — c'est le plafond de rapatriement compte comme la totalite,
+    deplace au niveau du terminal.
+    """
+    import argparse
+
+    analyseur = argparse.ArgumentParser(
+        prog="fundora-prospect-collecte",
+        description="Balaye le BODACC et ecrit en base. Aucun montant minimum : "
+        "le seuil est un filtre de LECTURE, l'appliquer ici obligerait a recollecter.",
+    )
+    analyseur.add_argument(
+        "--departements",
+        default="PACA",
+        help='Codes separes par des virgules, ou "PACA" (defaut).',
+    )
+    analyseur.add_argument("--mois", type=int, default=12, help="Fenetre glissante (defaut 12).")
+    analyseur.add_argument(
+        "--base", default=None, help="Chemin du fichier SQLite (defaut : $FUNDORA_DB)."
+    )
+    options = analyseur.parse_args(arguments)
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    connexion = entrepot.ouvrir(options.base)
+    try:
+        resultat = balayer(
+            connexion,
+            departements=normaliser_departements(options.departements),
+            mois=options.mois,
+        )
+    finally:
+        connexion.close()
+
+    print(f"\nlot {resultat.lot} — {resultat.debut} a {resultat.fin}")
+    print(
+        f"  {resultat.annonces_publiees} publiees, "
+        f"{resultat.annonces_rapatriees} rapatriees, "
+        f"{resultat.annonces_exploitables} exploitables, "
+        f"{resultat.sans_cedant_ou_illisibles} sans cedant ou illisibles"
+    )
+    print(
+        f"  {resultat.evenements_ecrits} evenements ecrits "
+        f"dont {resultat.evenements_nouveaux} nouveaux"
+    )
+    print(
+        f"  {resultat.enrichissements} appels pour {resultat.cedants_distincts} cedants "
+        f"distincts — {resultat.enrichissements_evites} evites ({resultat.economie:.0%})"
+    )
+    if resultat.transitions:
+        print(
+            f"  {len(resultat.transitions)} changements de statut, "
+            f"dont {len(resultat.sorties_du_flux)} sorties du flux"
+        )
+    if resultat.revisions:
+        print(f"  {len(resultat.revisions)} faits revises depuis la derniere collecte")
+    # Les reserves ne s'affichent que quand elles MORDENT : une mise en garde
+    # permanente cesse d'etre lue.
+    if resultat.plafond_atteint:
+        print(f"  ATTENTION : plafond de {PLAFOND_BALAYAGE} atteint, des annonces non lues")
+    for incident in resultat.incidents:
+        print(f"  incident : {incident}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

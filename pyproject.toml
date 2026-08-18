@@ -13,6 +13,11 @@ dependencies = [
 # est plus robuste qu'un `python -m` : il ne depend ni du cwd ni du PYTHONPATH.
 [project.scripts]
 fundora-prospect-mcp = "fundora_prospect.mcp_server:main"
+# Le job de collecte et la surface web ont besoin d'etre lancables sans ecrire
+# de Python : le premier finira dans un `cron`, et une commande qui n'existe
+# pas ne se planifie pas.
+fundora-prospect-collecte = "fundora_prospect.collecte:main"
+fundora-prospect-api = "fundora_prospect.api:main"
 
 [project.optional-dependencies]
 # La surface web est OPTIONNELLE. Le plugin Claude Code n'en a pas besoin, et

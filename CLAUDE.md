@@ -1586,22 +1586,25 @@ Le réflexe aurait été de contourner — et la dépendance, seule chose qui g�
 cycle de vie des connexions, n'aurait jamais été exercée. Les tests passent donc
 par `FUNDORA_DB` et laissent tourner le vrai code.
 
-#### Le garde-fou « dix lignes par route » a mal vieilli
+Les deux défauts trouvés en écrivant cette surface ont donné deux leçons
+générales, écrites plus bas : **le nombre de décisions plutôt que le nombre de
+lignes**, et **le défaut dont le symptôme est plausible**.
 
-Deux corps le dépassent. Mesuré avant de conclure : `leads` fait 17 lignes et
-prend **zéro décision** — trois affectations, un appel au cœur, une enveloppe de
-neuf lignes. La longueur y mesure la taille de la réponse.
+#### L'enveloppe reste montée deux fois, et c'est délibéré
 
-`evenement` est le seul à brancher, et c'est là que la relecture a payé : la
-branche `transitions(...) if siren else []` n'était gardée par aucun test. Sans
-elle, un événement sans cédant identifié récupérait le journal de **toutes** les
-sociétés. Pas une fuite hors du système — une attribution fausse, ce qui est
-pire dans une fiche d'audit qu'une absence.
+`/leads` et `search_liquidity_events` construisent chacun leur dict de sept
+clés. Partager le constructeur exigerait de faire porter `departements`,
+`debut` et `fin` par `ResultatLecture` — trois champs traversant le cœur pour
+de la seule mise en forme, c'est-à-dire **l'inverse du mouvement de l'étape 1**,
+qui a fait descendre la logique du transport vers le cœur.
 
-**Le critère devient le nombre de décisions, pas le nombre de lignes.** Une
-route qui assemble un gros dict reste une route ; une route qui teste trois
-conditions commence à juger. La longueur garde son rôle de déclencheur de
-relecture, elle perd celui de verdict.
+Ce qui garde les deux enveloppes égales est le test de comparaison. Si une
+troisième surface arrive, **c'est le test qu'on étend, pas le modèle qu'on
+alourdit.**
+
+À ne pas confondre avec `presenter_evaluation`, extrait au même moment : là il
+s'agissait d'une *logique* de mise en forme dupliquée à l'identique, pas d'un
+contexte que chaque surface connaît déjà.
 
 #### `symboles_morts` gagne une quatrième justification
 
@@ -1633,6 +1636,87 @@ son dict à la main — neuf tests rougissent, dont ceux des deux surfaces), une
 sur le garde `siren`, deux sur la nouvelle règle de l'audit, une sur `api.py`
 important `provenance`.
 
+### Leçon générale : ce qui décide, c'est le nombre de décisions — pas le nombre de lignes
+
+**Règle de ce projet, en vigueur : dans une surface (`api.py`, `mcp_server.py`),
+une route ou un outil peut être long ; il ne peut pas décider.** On compte les
+branches, pas les lignes. La longueur reste utile — elle déclenche une
+relecture — mais elle ne rend plus de verdict.
+
+Le garde-fou précédent disait « si le corps d'une route dépasse une dizaine de
+lignes, c'est de la logique qui a quitté le cœur ». Il a été mesuré et retiré.
+
+Le cas qui l'a produit : **`GET /leads` fait 17 lignes et prend zéro décision.**
+
+| Route | Lignes | Décisions | Lignes de littéral dict |
+|---|---|---|---|
+| `leads` | 17 | **0** | 9 |
+| `evenement` | 14 | 5 | 8 |
+| `collecte` | 7 | 1 | 5 |
+| `sorties` | 6 | 2 | 5 |
+| `hypothese` | 1 | 0 | 0 |
+
+Trois affectations, un appel au cœur, une enveloppe de neuf lignes. Le seuil
+mesurait la **taille de la réponse**, ce qui n'a aucun rapport avec la question
+posée. Une route qui assemble un gros dict reste une route ; une route qui teste
+trois conditions commence à juger.
+
+**Ce que le seuil a quand même produit de bon** : il a forcé à regarder
+`evenement`, le seul à brancher — et c'est là qu'un vrai défaut attendait (voir
+la leçon suivante). Un mauvais critère qui déclenche la bonne relecture vaut
+mieux que pas de critère ; il ne vaut pas d'être conservé comme verdict.
+
+La règle générale derrière : **un proxy facile à mesurer se substitue à la
+propriété qu'on visait**, et il finit par être appliqué pour lui-même. C'est le
+mécanisme des six visages — « ce qui est facile à vérifier se substitue à ce qui
+compte » — appliqué cette fois non à une assertion mais à une règle de revue.
+
+### Leçon générale : un défaut dont le symptôme est plausible
+
+Trouvé en Phase 6 étape 2, sur une branche d'une seule ligne :
+
+```python
+"transitions": [_transition(t) for t in entrepot.transitions(base, siren=siren)]
+if siren
+else [],
+```
+
+Sans le `if siren`, `entrepot.transitions(base, siren=None)` **retire le
+filtre** et rend le journal entier. La fiche d'un événement sans cédant
+identifié afficherait donc les changements de statut de *toutes* les sociétés de
+la base, présentés comme les siens.
+
+**Ce n'est pas un des six visages.** Les six décrivent des tests aveugles — une
+assertion qui passe pour une raison sans rapport avec ce qu'elle prétend garder.
+Ici l'assertion manquait, simplement. Ce qui rend le cas intéressant est
+ailleurs : **la sortie fautive est plus crédible que la sortie correcte.**
+
+| | Ce que ça donne | Comment ça se lit |
+|---|---|---|
+| Comportement correct | `"transitions": []` | un champ vide — **se voit** |
+| Comportement fautif | trois transitions datées | un fait — **se lit** |
+
+Un champ vide interpelle : on se demande pourquoi. Un rattachement erroné ne
+demande rien, il informe. **Dans une fiche d'audit, une attribution fausse est
+pire qu'une absence**, parce que l'absence déclenche une vérification et que le
+faux fait la remplace.
+
+Deux conséquences de méthode :
+
+1. **Une API dont un paramètre absent signifie « tout » est un piège au point
+   d'appel.** `transitions(siren=None)` est légitime pour `/sorties`, qui veut
+   effectivement tout ; il est dangereux partout où le siren est optionnel. Le
+   garde appartient à l'appelant, et il doit être testé chez l'appelant.
+2. **Le corpus du test doit contenir de quoi être mal attribué.** Une base
+   sans aucune transition rendrait `[]` dans les deux cas — corpus dégénéré, une
+   fois de plus. Le test fait donc basculer une société *et* interroge un
+   événement sans siren : la version fautive rend une liste non vide, la
+   correcte rend `[]`.
+
+Le signal à surveiller, plus large que ce cas : **quand une valeur par défaut
+veut dire « pas de filtre », le mode dégradé n'est pas l'absence, c'est
+l'excès** — et l'excès ressemble à un résultat.
+
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
 **Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc
@@ -1663,6 +1747,46 @@ cette fois **entre deux surfaces** au lieu d'être à l'intérieur d'une seule.
 Elle est acceptable tant qu'elle est déclarée. Le jour où quelqu'un comparera
 un résultat MCP et un résultat web sans savoir ça, il conclura à un bug de
 scoring et cherchera au mauvais endroit.
+
+## Piège d'environnement : un `.pth` caché désactive l'installation éditable
+
+Rencontré le 2026-08-18 en vérifiant les commandes de lancement. Symptôme :
+
+```
+$ .venv/bin/fundora-prospect-collecte
+ModuleNotFoundError: No module named 'fundora_prospect'
+```
+
+alors que `pytest` passe et que le paquet est installé en éditable.
+
+**Cause.** L'install éditable dépose
+`site-packages/_editable_impl_fundora_prospect.pth`, qui contient le chemin de
+`src/`. Sous `~/Desktop`, quelque chose lui applique le flag macOS
+**`UF_HIDDEN`** — et `site.addpackage` **saute silencieusement les `.pth`
+cachés**. Aucun message, aucun avertissement : le chemin n'est simplement jamais
+ajouté à `sys.path`. Le flag revient après chaque réinstallation. Un venv créé
+dans `/private/tmp` n'a pas le problème.
+
+**Pourquoi ça n'a pas été vu plus tôt** — et c'est le vrai enseignement : les
+deux façons de lancer le projet contournaient le défaut sans le signaler.
+`pytest` a `pythonpath = ["src", "."]` dans `pyproject.toml`, et `demo.sh` force
+`PYTHONPATH` avec le commentaire « la démo n'a pas le droit de tomber devant un
+recruteur pour une histoire de sys.path ». **Deux contournements écrits par
+prudence ont masqué un environnement cassé pendant des semaines** — y compris
+pour `fundora-prospect-mcp`, le point d'entrée que `.mcp.json` référence.
+
+Un contournement défensif rend le chemin nominal non testé. C'est la même forme
+que le faux ami de la substitution de dépendance en Phase 6 : ce qui fait passer
+le test cache ce que le test devait prouver.
+
+**Réparation ponctuelle** — à refaire après chaque `pip install -e` :
+
+```sh
+chflags nohidden .venv/lib/python3.13/site-packages/*.pth
+```
+
+**Contournement fiable, et celui à donner** : `export PYTHONPATH="$PWD/src"`.
+Il fonctionne quel que soit l'état de l'installation.
 
 ## Si le temps manque
 
