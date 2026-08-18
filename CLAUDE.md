@@ -1717,6 +1717,98 @@ Le signal à surveiller, plus large que ce cas : **quand une valeur par défaut
 veut dire « pas de filtre », le mode dégradé n'est pas l'absence, c'est
 l'excès** — et l'excès ressemble à un résultat.
 
+## Phase 7 — le front web
+
+Contrainte structurante : **le front n'affiche que ce que l'API rend.** Il ne
+recalcule ni score, ni compteur, ni motif. Se retrouver à réimplémenter de la
+logique en JavaScript est le signal qu'une route ne rend pas assez — pas une
+invitation à la coder deux fois.
+
+### La frontière : le front connaît des CLÉS, jamais des VALEURS
+
+Sans cette ligne, « aucune donnée en dur » devient inapplicable : afficher quoi
+que ce soit exige de nommer quelque chose.
+
+- **Autorisé** — `lead.score`, `statistiques.annonces_publiees`, le chemin
+  `/leads`, `type_cedant === "pp"` pour choisir une classe CSS. Ce sont des
+  liaisons *structurelles*, du même ordre que connaître l'URL d'une route.
+- **Interdit** — `"apport"`, `"sous le montant minimum"`, `"personne
+  physique"`, `"fraîcheur"`, tout seuil, tout poids. Ce sont des *valeurs* :
+  elles viennent de l'API ou n'existent pas.
+
+### Étape 1 ✅ — ce que le front a révélé de manquant dans le cœur
+
+Trois manques et un défaut, trouvés **avant** d'écrire une ligne de front — en
+lisant une vraie réponse plutôt qu'en imaginant l'écran.
+
+#### Le défaut : un motif de config tronqué en plein milieu de phrase
+
+`scoring.py` rendait `grille.departement.motif.splitlines()[0]` — la première
+ligne **physique** du bloc TOML, c'est-à-dire un retour à la ligne de mise en
+page. Le motif s'arrêtait sur « rien ne justifie de ».
+
+C'est la contrainte 5 en défaut : un motif coupé n'explique rien, et c'est
+précisément le « pourquoi zéro » qu'un breakdown doit donner. Le test en place
+disait `assert contribution.motif` — présence seule, encore une fois, et c'est
+par là que la troncature est passée.
+
+**Règle : un motif est un texte, il sort entier.** Si un affichage a besoin
+d'une version courte, c'est un second champ nommé, jamais un découpage
+silencieux. Deux tests le gardent : le cas connu, et un **garde générique** —
+citer le début d'un motif de config oblige à le citer en entier, pour tous les
+critères présents et à venir. Trois mutations (`splitlines()[0]`, `[:80]`,
+`split('.')[0]`), trois détectées.
+
+#### Manque 1 : les écartés n'étaient pas listables
+
+`/leads` ne rendait que des *comptes* par motif. `/evenements/{id}` montre un
+écarté, mais aucune route ne donnait les ids des écartés — donc rien à cliquer.
+L'auditabilité s'arrêtait au comptage : on savait qu'il y avait 23 sociétés
+cédantes cessées, on ne pouvait pas dire lesquelles.
+
+`GET /ecartes?departement=…&motif=…&limite=…`, et un changement de fond dans le
+cœur : **`classer` collecte des paires `(événement, motif)` au lieu
+d'incrémenter un dict, et les comptes en dérivent.** Une source au lieu de deux.
+Avant, la liste et le décompte auraient pu se contredire ; maintenant ils ne le
+peuvent pas, et un test le vérifie motif par motif.
+
+**Un écarté n'est pas un lead, et sa forme l'interdit** : ni `score`, ni bloc
+`provenance`, ni `breakdown`. Lui donner la forme d'un lead rouvrirait un second
+chemin par lequel quelque chose ressemblant à un lead quitte le système sans
+passer par `provenance.serialiser` — le défaut de la Phase 3 bis, réintroduit
+par une route d'audit. `url_publication` y reste : c'est ce qui rend le refus
+vérifiable par un tiers.
+
+#### Manque 2 : la fraîcheur n'existait qu'en prose
+
+Le nombre de jours vivait uniquement dans le texte du motif. Une surface voulant
+l'afficher devait soit le recalculer — second calcul, donc divergence — soit
+chercher le critère par son nom, donc recopier un mot du domaine.
+`Evaluation.jours_ecoules` et `date_reference` sont désormais calculés **une
+fois**, par `evaluer`, et recopiés par `serialiser`. Le test croise les deux
+présentations : le nombre en donnée doit être celui que la prose annonce.
+
+#### Manque 3 : `type_cedant` valait `"pm"` / `"pp"`
+
+`TypeCedant.libelle` est la source unique du libellé, et `serialiser` rend
+`type_cedant_libelle`. Le segment personne physique relève d'une base légale
+distincte — cette distinction ne doit pas dépendre d'une table de
+correspondance écrite dans une surface. Trois segments, trois textes, et un
+test qui échoue si deux d'entre eux se confondent.
+
+#### `/ecartes` est la troisième surface à nommer ces refus
+
+Elle passe par le même `pipeline.lire` que `/leads`, donc les motifs y sont les
+mêmes objets. Mais c'est vrai *aujourd'hui*, pas par construction : le jour où
+quelqu'un lui donne son propre parcours « pour aller plus vite », seule une
+comparaison le verra. Même test qu'entre MCP et API, appliqué une troisième
+fois.
+
+Onze mutations, zéro survivante. Une d'elles n'a pas pris — mauvaise ancre — et
+son « tout vert » ne prouvait rien : **une mutation qui ne s'applique pas est
+une mutation non jouée**, à distinguer d'une survivante. Rejouée avec la bonne
+ancre, elle est détectée.
+
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
 **Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc

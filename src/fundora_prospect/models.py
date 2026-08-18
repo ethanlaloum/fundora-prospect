@@ -28,6 +28,25 @@ class TypeCedant(StrEnum):
     PERSONNE_PHYSIQUE = "pp"
     INCONNU = "inconnu"
 
+    @property
+    def libelle(self) -> str:
+        """Le nom lisible du segment. **Source unique du libelle.**
+
+        Une surface qui ecrirait « personne physique » dans son propre code
+        recopierait un vocabulaire du domaine, et le recopierait au moment
+        precis ou il faut le lire — le segment personne physique releve d'une
+        base legale distincte, et cette distinction ne doit pas dependre d'une
+        table de correspondance ecrite ailleurs.
+        """
+        return _LIBELLES_TYPE_CEDANT[self]
+
+
+_LIBELLES_TYPE_CEDANT = {
+    TypeCedant.PERSONNE_MORALE: "personne morale",
+    TypeCedant.PERSONNE_PHYSIQUE: "personne physique",
+    TypeCedant.INCONNU: "type de cedant non renseigne",
+}
+
 
 class StatutEntreprise(StrEnum):
     """Statut administratif de la societe cedante.
@@ -133,6 +152,16 @@ class Evaluation(BaseModel):
     score: float | None = None
     contributions: list[ContributionCritere] = Field(default_factory=list)
 
+    # La fraicheur, en donnee et pas seulement en prose.
+    #
+    # Le nombre de jours existait DEJA, mais uniquement dans le texte du motif
+    # (« 7 jours depuis la date de parution »). Une surface qui voudrait
+    # l'afficher devrait soit le recalculer — deuxieme calcul, donc divergence
+    # le jour ou la regle change — soit chercher le critere par son nom, donc
+    # recopier un mot du domaine. Il est calcule une fois, ici, par `evaluer`.
+    jours_ecoules: int | None = None
+    date_reference: date | None = None
+
 
 # Conserve pour compatibilite avec le vocabulaire de la spec.
 ScoreBreakdown = Evaluation
@@ -160,6 +189,38 @@ def presenter_contributions(evaluation: Evaluation) -> list[dict[str, Any]]:
         }
         for c in evaluation.contributions
     ]
+
+
+def presenter_ecarte(event: LiquidityEvent, motif: str) -> dict[str, Any]:
+    """Un refus, mis en forme pour etre consulte.
+
+    **Ni score, ni bloc `provenance`, et c'est structurel.** Un ecarte n'est pas
+    un lead : il ne sort pas comme prospect, il sort comme refus motive. Lui
+    donner la forme d'un lead ouvrirait un second chemin par lequel quelque
+    chose ressemblant a un lead quitte le systeme sans passer par
+    `provenance.serialiser` — exactement le defaut de la Phase 3 bis.
+
+    `url_publication` y figure quand meme : c'est ce qui rend le refus
+    verifiable par un tiers, et c'est la raison d'etre de cette vue.
+
+    Prend l'evenement et le motif plutot qu'un `pipeline.Ecarte` : `models` ne
+    peut pas importer `pipeline`, qui l'importe deja.
+    """
+    return {
+        "id": event.id,
+        "motif": motif,
+        "cedant": event.cedant_denomination,
+        "siren": event.cedant_siren,
+        "type_cedant": str(event.cedant_type),
+        "type_cedant_libelle": event.cedant_type.libelle,
+        "montant_eur": event.montant_eur,
+        "devise": event.devise,
+        "date_acte": event.date_acte.isoformat() if event.date_acte else None,
+        "date_parution": event.date_parution.isoformat(),
+        "departement": event.departement,
+        "statut_cedant": str(event.statut_cedant),
+        "url_publication": event.url_publication,
+    }
 
 
 def presenter_evaluation(evaluation: Evaluation) -> dict[str, Any]:

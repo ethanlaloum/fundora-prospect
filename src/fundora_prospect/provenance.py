@@ -132,9 +132,22 @@ def serialiser(lead: Lead) -> dict[str, Any]:
         "cedant": event.cedant_denomination,
         "siren": event.cedant_siren,
         "type_cedant": str(event.cedant_type),
+        # Le libelle vient de l'enum, jamais d'une table recopiee par une
+        # surface : le segment personne physique releve d'une base legale
+        # distincte, et c'est le moment ou cette distinction doit rester lisible.
+        "type_cedant_libelle": event.cedant_type.libelle,
         "montant_eur": event.montant_eur,
         "date_acte": event.date_acte.isoformat() if event.date_acte else None,
         "date_parution": event.date_parution.isoformat(),
+        # Recopies de l'evaluation, jamais recalcules ici : `serialiser` n'a pas
+        # de notion d'aujourd'hui, et s'en donner une ferait un second calcul de
+        # fraicheur a cote du premier.
+        "jours_ecoules": lead.evaluation.jours_ecoules,
+        "date_reference": (
+            lead.evaluation.date_reference.isoformat()
+            if lead.evaluation.date_reference
+            else None
+        ),
         "departement": event.departement,
         "statut_cedant": str(event.statut_cedant),
         "statut_motif": event.motif_enrichissement,

@@ -76,7 +76,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from fundora_prospect import __version__, entrepot, pipeline
-from fundora_prospect.models import StatutEntreprise, presenter_evaluation
+from fundora_prospect.models import (
+    StatutEntreprise,
+    presenter_ecarte,
+    presenter_evaluation,
+)
 from fundora_prospect.pipeline import (
     LIMITE_DEFAUT,
     LIMITE_MAX,
@@ -169,6 +173,46 @@ def leads(
         "montant_min_eur": resultat.montant_min,
         "statistiques": resultat.statistiques,
         "leads": resultat.leads,
+    }
+
+
+@app.get("/ecartes")
+def ecartes(
+    base: Base,
+    departement: str = Query("PACA", description='Codes separes par des virgules, ou "PACA".'),
+    mois: int = Query(12, ge=1, le=MOIS_MAX),
+    montant_min: float = Query(0.0, ge=0),
+    motif: str | None = Query(None, description="Filtre sur un motif de refus exact."),
+    limite: int = Query(LIMITE_DEFAUT, ge=1, le=LIMITE_MAX),
+) -> dict[str, Any]:
+    """Les evenements REFUSES, avec leur motif. L'auditabilite ne s'arrete pas
+    au comptage.
+
+    Passe par le meme `pipeline.lire` que `/leads`, sur les memes parametres :
+    les motifs y sont donc les memes objets, pas deux vocabulaires qui se
+    ressemblent. Un test compare quand meme les deux routes — c'est la troisieme
+    surface a nommer ces refus.
+    """
+    departements = normaliser_departements(departement)
+    fin = date.today()
+    debut = fenetre(mois, fin)
+    resultat = pipeline.lire(
+        entrepot.evenements(base, departements=departements, depuis=debut, jusqu_a=fin),
+        montant_min=montant_min,
+        limite=1,
+    )
+    retenus = [e for e in resultat.ecartes if motif is None or e.motif == motif]
+    return {
+        "departements": departements,
+        "periode": {"debut": debut.isoformat(), "fin": fin.isoformat()},
+        "montant_min_eur": resultat.montant_min,
+        "motif": motif,
+        # Deux grandeurs, deux noms : ce qui correspond au filtre, et ce que la
+        # coupe a laisse passer. Une coupe qui ne se declare pas se lit comme un
+        # resultat.
+        "correspondants": len(retenus),
+        "rendus": min(len(retenus), limite),
+        "ecartes": [presenter_ecarte(e.event, e.motif) for e in retenus[:limite]],
     }
 
 

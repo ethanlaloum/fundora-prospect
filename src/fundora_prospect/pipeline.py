@@ -41,7 +41,7 @@ descendu ici : un formulaire web ecrit « PACA » exactement comme un modele.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
@@ -342,6 +342,42 @@ def repartir(
     return candidats, ecartes
 
 
+# --- Les ecartes : une liste, et des comptes qui en DERIVENT -------------------
+
+
+@dataclass(frozen=True)
+class Ecarte:
+    """Un evenement refuse, et pourquoi.
+
+    **Ce n'est pas un lead, et ca ne doit jamais pouvoir passer pour un lead.**
+    Il n'a ni score ni bloc de provenance : il n'est pas exporte comme prospect,
+    il est consultable comme refus. La contrainte 3 porte sur ce qui sort en
+    tant que lead ; un refus motive est l'inverse d'un lead.
+    """
+
+    event: LiquidityEvent
+    motif: str
+
+
+def compter_par_motif(
+    ecartes: Iterable[Ecarte], base: dict[str, int] | None = None
+) -> dict[str, int]:
+    """Les comptes par motif, **derives de la liste**.
+
+    Avant, la liste n'existait pas et les comptes etaient tenus au vol dans un
+    dict. Deux consequences : on ne pouvait pas consulter les refuses, et le
+    jour ou on l'aurait pu, le decompte et la liste auraient ete deux sources
+    pouvant diverger. Une seule source, la liste ; le compte s'en deduit.
+
+    `base` permet au chemin direct d'y ajouter ses refus d'avant classement,
+    qui portent sur des `Annonce` et non des `LiquidityEvent`.
+    """
+    comptes = dict(base or {})
+    for ecarte in ecartes:
+        comptes[ecarte.motif] = comptes.get(ecarte.motif, 0) + 1
+    return comptes
+
+
 # --- Classement : l'etape partagee par la recherche et la lecture --------------
 
 
@@ -351,7 +387,7 @@ def classer(
     grille: GrillePonderation,
     aujourdhui: date,
     limite: int,
-    ecartes: dict[str, int],
+    ecartes: list[Ecarte],
     date_collecte_de: Callable[[LiquidityEvent], date],
 ) -> tuple[list[dict[str, Any]], int]:
     """Score, filtre sur le statut, trace, trie, tronque. Rend les leads rendus
@@ -369,19 +405,19 @@ def classer(
     annoncerait une consultation du BODACC qui n'a pas eu lieu.
     """
 
-    def ecarter(motif: str) -> None:
-        ecartes[motif] = ecartes.get(motif, 0) + 1
+    def ecarter(event: LiquidityEvent, motif: str) -> None:
+        ecartes.append(Ecarte(event=event, motif=motif))
 
     leads: list[dict[str, Any]] = []
     for event in evenements:
         evaluation = evaluer(event, grille, aujourdhui=aujourdhui)
         if not evaluation.classable:
             if event.statut_cedant is StatutEntreprise.CESSEE:
-                ecarter("societe cedante cessee")
+                ecarter(event, "societe cedante cessee")
             elif event.statut_cedant is StatutEntreprise.NON_DIFFUSIBLE:
-                ecarter("entreprise non diffusible INSEE")
+                ecarter(event, "entreprise non diffusible INSEE")
             else:
-                ecarter("non classable")
+                ecarter(event, "non classable")
             continue
 
         # Porte unique de sortie : `assembler` leve si la provenance est
@@ -393,7 +429,7 @@ def classer(
                 event, evaluation, date_collecte=date_collecte_de(event)
             )
         except ValidationError:
-            ecarter("provenance incomplete")
+            ecarter(event, "provenance incomplete")
             continue
         leads.append(provenance.serialiser(lead))
 
@@ -453,7 +489,12 @@ def executer(
     annonces = recherche.annonces
 
     # 1. Filtrage sans appel reseau : inutile d'enrichir ce qu'on jettera.
-    candidats, ecartes = repartir(annonces, montant_min=montant_min)
+    #
+    # Ces refus-la portent sur des `Annonce` et non des `LiquidityEvent` : ils
+    # restent des COMPTES, et servent de base a ceux que `classer` collectera.
+    # Le chemin direct ne sert pas `/ecartes` — voir l'asymetrie de population
+    # entre les deux surfaces, deja documentee.
+    candidats, comptes_avant_classement = repartir(annonces, montant_min=montant_min)
 
     # 2. Pre-classement sans enrichissement, pour n'enrichir que le haut du
     #    panier : l'enrichissement coute un appel API par lead.
@@ -477,6 +518,7 @@ def executer(
         LiquidityEvent.depuis_annonce(annonce, enrichir(annonce.cedant.siren))
         for annonce in a_enrichir
     )
+    ecartes: list[Ecarte] = []
     leads, classables = classer(
         evenements,
         grille=grille,
@@ -518,7 +560,7 @@ def executer(
         "candidats_non_enrichis": len(candidats) - len(a_enrichir),
         "classables_parmi_les_enrichis": classables_parmi_les_enrichis,
         "leads_rendus": len(leads),
-        "ecartes": ecartes,
+        "ecartes": compter_par_motif(ecartes, base=comptes_avant_classement),
     }
     return ResultatPipeline(
         leads=leads,
@@ -583,6 +625,10 @@ class ResultatLecture:
     leads: list[dict[str, Any]]
     statistiques: dict[str, Any]
     montant_min: float
+    # Les refuses eux-memes, pas seulement leur nombre. Sans eux,
+    # l'auditabilite s'arrete au comptage : on sait qu'il y a eu 23 societes
+    # cedantes cessees, on ne peut pas dire lesquelles.
+    ecartes: list[Ecarte] = field(default_factory=list)
 
 
 def lire(
@@ -616,13 +662,13 @@ def lire(
     # son adaptateur. Un second endroit qui nommerait « sous le montant
     # minimum » autrement casserait tout comptage agregeant les deux sources.
     candidats: list[Any] = []
-    ecartes: dict[str, int] = {}
+    ecartes: list[Ecarte] = []
     for stocke in evenements:
         motif = motif_ecart_evenement(stocke.event, montant_min)
         if motif is None:
             candidats.append(stocke)
         else:
-            ecartes[motif] = ecartes.get(motif, 0) + 1
+            ecartes.append(Ecarte(event=stocke.event, motif=motif))
 
     dates = {stocke.event.id: stocke.date_collecte for stocke in candidats}
     leads, classables = classer(
@@ -640,11 +686,17 @@ def lire(
         "candidats": len(candidats),
         "classables": classables,
         "leads_rendus": len(leads),
-        "ecartes": ecartes,
+        # Derives de `ecartes`, jamais tenus en parallele : la liste est la
+        # source, le compte en decoule. C'est ce qui garantit que `/ecartes` et
+        # les compteurs de `/leads` ne peuvent pas se contredire.
+        "ecartes": compter_par_motif(ecartes),
     }
     if collecte:
         statistiques.update(collecte)
 
     return ResultatLecture(
-        leads=leads, statistiques=statistiques, montant_min=montant_min
+        leads=leads,
+        statistiques=statistiques,
+        montant_min=montant_min,
+        ecartes=ecartes,
     )

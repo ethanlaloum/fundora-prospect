@@ -55,7 +55,7 @@ from fastapi.testclient import TestClient
 from fundora_prospect import api, collecte, entrepot, mcp_server
 from fundora_prospect.bodacc import Annonce, Cedant, ResultatRecherche
 from fundora_prospect.enrichment import Enrichissement
-from fundora_prospect.models import StatutEntreprise
+from fundora_prospect.models import StatutEntreprise, TypeCedant
 from fundora_prospect.prix import Confiance, PrixCession, Qualification
 from tests.test_mcp_server import appeler
 
@@ -153,6 +153,32 @@ def base_peuplee(base: sqlite3.Connection) -> sqlite3.Connection:
 
 @pytest.fixture
 def client(base_peuplee: sqlite3.Connection) -> TestClient:
+    return TestClient(api.app)
+
+
+@pytest.fixture
+def client_riche(base: sqlite3.Connection) -> TestClient:
+    """Un corpus **choisi pour que la coupe morde**.
+
+    Les tests de `/ecartes` comparent deux grandeurs — combien correspondent au
+    filtre, combien sont rendus. Avec trois annonces elles vaudraient le meme
+    nombre et le test serait vert que le total soit compte avant ou apres la
+    coupe. Il faut donc un motif abondant : six cessions sous le seuil, deux
+    apports, une retenue.
+    """
+    corpus_riche = [annonce(f"PETIT{i}", montant=50_000.0) for i in range(6)]
+    corpus_riche += [
+        annonce(f"APPORT{i}", montant=500_000.0, qualification=Qualification.APPORT)
+        for i in range(2)
+    ]
+    corpus_riche.append(annonce("RETENU", montant=400_000.0))
+    collecte.balayer(
+        base, departements=["06"],
+        rechercher=lambda **_: ResultatRecherche(
+            annonces=corpus_riche, publiees=len(corpus_riche), rapatriees=len(corpus_riche)
+        ),
+        enrichir=enrichir_stub,
+    )
     return TestClient(api.app)
 
 
@@ -276,6 +302,131 @@ def test_leads_ne_regarde_que_la_fenetre_demandee(base: sqlite3.Connection) -> N
 
     assert large["statistiques"]["evenements_en_base"] == 1
     assert etroite["statistiques"]["evenements_en_base"] == 0, "hors fenetre, donc jamais lue"
+
+
+# --- /ecartes : la troisieme surface qui nomme les memes refus ----------------
+
+
+def test_ecartes_et_leads_emploient_le_MEME_VOCABULAIRE(client_riche: TestClient) -> None:
+    """**Troisieme surface a nommer ces refus, troisieme comparaison.**
+
+    Les deux routes passent par `pipeline.lire`, donc les motifs sont les memes
+    objets — mais c'est vrai aujourd'hui, pas par construction. Le jour ou
+    quelqu'un donne a `/ecartes` son propre parcours « pour aller plus vite »,
+    seul ce test le verra : chaque route isolee resterait verte avec son propre
+    vocabulaire.
+    """
+    parametres = {"departement": "06", "mois": 12, "montant_min": MONTANT_MIN}
+    comptes = client_riche.get("/leads", params=parametres).json()["statistiques"]["ecartes"]
+    liste = client_riche.get("/ecartes", params={**parametres, "limite": 100}).json()["ecartes"]
+
+    assert comptes, "corpus degenere : sans refus, la comparaison ne garde rien"
+    assert len(comptes) >= 2, "il faut plusieurs motifs pour comparer des vocabulaires"
+    assert {e["motif"] for e in liste} == set(comptes)
+
+
+def test_les_comptes_de_leads_SE_DERIVENT_de_la_liste_d_ecartes(client_riche: TestClient) -> None:
+    """Une source, pas deux.
+
+    Avant, les comptes etaient tenus au vol dans un dict et la liste n'existait
+    pas. Maintenant la liste est la source et le compte en decoule — ce test
+    verrouille l'egalite motif par motif, pas seulement l'ensemble des cles.
+    """
+    parametres = {"departement": "06", "mois": 12, "montant_min": MONTANT_MIN}
+    comptes = client_riche.get("/leads", params=parametres).json()["statistiques"]["ecartes"]
+    liste = client_riche.get("/ecartes", params={**parametres, "limite": 100}).json()["ecartes"]
+
+    recomptes: dict[str, int] = {}
+    for e in liste:
+        recomptes[e["motif"]] = recomptes.get(e["motif"], 0) + 1
+    assert recomptes == comptes
+
+
+def test_ecartes_se_filtre_par_motif_SANS_mentir_sur_le_total(client_riche: TestClient) -> None:
+    """Le filtre restreint, et le total dit combien correspondent AVANT la coupe.
+
+    Le corpus separe les deux : plus de correspondants que la limite, sinon le
+    test serait vert que le total soit compte avant ou apres.
+    """
+    parametres = {"departement": "06", "mois": 12, "montant_min": MONTANT_MIN}
+    comptes = client_riche.get("/leads", params=parametres).json()["statistiques"]["ecartes"]
+    motif, total = max(comptes.items(), key=lambda kv: kv[1])
+    assert total > 3, "il faut un motif abondant pour que la coupe morde"
+
+    charge = client_riche.get("/ecartes", params={**parametres, "motif": motif, "limite": 3}).json()
+    assert charge["correspondants"] == total, "le total se compte avant la coupe"
+    assert charge["rendus"] == 3
+    assert {e["motif"] for e in charge["ecartes"]} == {motif}
+
+
+def test_le_lead_porte_la_FRAICHEUR_en_donnee_pas_seulement_en_prose(
+    client: TestClient,
+) -> None:
+    """Le nombre de jours n'existait que dans le texte du motif.
+
+    Une surface qui voudrait l'afficher devrait soit le recalculer — deuxieme
+    calcul, donc divergence le jour ou la regle change — soit chercher le
+    critere par son nom, donc recopier un mot du domaine. Il est desormais
+    calcule une fois par `evaluer` et recopie tel quel.
+
+    L'assertion croise les deux presentations : le nombre en donnee doit etre
+    celui que la prose annonce. Verifier seulement sa presence laisserait
+    passer un champ qui compte autre chose.
+    """
+    lead = client.get("/leads", params={"departement": "06"}).json()["leads"][0]
+    assert lead["jours_ecoules"] == 30, "les annonces du corpus datent de 30 jours"
+    assert lead["date_reference"] == (date.today() - timedelta(days=30)).isoformat()
+
+    fraicheur = next(c for c in lead["breakdown"] if c["critere"] == "fraicheur")
+    assert f"{lead['jours_ecoules']} jours" in fraicheur["motif"], (
+        "la donnee et la prose doivent dire le meme nombre"
+    )
+
+
+def test_le_libelle_du_type_de_cedant_vient_du_COEUR(client: TestClient) -> None:
+    """Le segment personne physique releve d'une base legale distincte.
+
+    Le libelle vient de l'enum et d'elle seule : une surface qui ecrirait
+    « personne physique » dans son propre code recopierait un vocabulaire du
+    domaine au moment precis ou il faut le lire.
+    """
+    lead = client.get("/leads", params={"departement": "06"}).json()["leads"][0]
+    assert lead["type_cedant"] == "pm"
+    assert lead["type_cedant_libelle"] == TypeCedant.PERSONNE_MORALE.libelle
+
+
+@pytest.mark.parametrize(
+    ("type_cedant", "attendu"),
+    [
+        (TypeCedant.PERSONNE_MORALE, "personne morale"),
+        (TypeCedant.PERSONNE_PHYSIQUE, "personne physique"),
+        (TypeCedant.INCONNU, "type de cedant non renseigne"),
+    ],
+)
+def test_chaque_segment_a_son_LIBELLE_PROPRE(type_cedant: TypeCedant, attendu: str) -> None:
+    """Les trois, et trois textes distincts. Un libelle commun aux trois
+    passerait le test precedent tout en effacant la distinction que la
+    contrainte impose de garder lisible."""
+    assert type_cedant.libelle == attendu
+    assert len({t.libelle for t in TypeCedant}) == 3
+
+
+def test_un_ecarte_NE_RESSEMBLE_PAS_a_un_lead(client: TestClient) -> None:
+    """**Structurel, pas cosmetique.**
+
+    Un ecarte qui porterait un `score` et un bloc `provenance` serait un second
+    chemin par lequel quelque chose ayant la forme d'un lead quitte le systeme
+    sans passer par `provenance.serialiser` — le defaut de la Phase 3 bis,
+    rouvert par une route d'audit.
+
+    `url_publication` reste : c'est ce qui rend le refus verifiable par un tiers.
+    """
+    e = client.get("/ecartes", params={"departement": "06", "limite": 1}).json()["ecartes"][0]
+    assert "score" not in e
+    assert "provenance" not in e
+    assert "breakdown" not in e
+    assert e["url_publication"].startswith("https://")
+    assert e["motif"]
 
 
 # --- 2. La provenance reste sur la porte unique -------------------------------
