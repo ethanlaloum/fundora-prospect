@@ -641,6 +641,7 @@ def evenements(
     departements: Sequence[str] | None = None,
     depuis: date | None = None,
     jusqu_a: date | None = None,
+    evenement_id: str | None = None,
 ) -> list[EvenementStocke]:
     """Les faits stockes, sans jugement.
 
@@ -654,9 +655,18 @@ def evenements(
     Aucun tri non plus : l'ordre du classement depend du score, donc de la date
     de lecture. Trier ici serait un pre-classement, et un pre-classement qui
     n'obeit pas aux regles du classement final est un filtre deguise.
+
+    `evenement_id` sert l'audit d'un cas isole. Il rend **aussi les ecartes** —
+    c'est meme sa raison d'etre : un classement ne rend jamais un refuse, et
+    « pourquoi celui-la a-t-il ete ecarte ? » est la seule question qu'on pose
+    a une route de detail. Une liste vide, pas une exception : l'absence est un
+    resultat, et c'est a l'appelant de decider ce qu'elle vaut.
     """
     clauses: list[str] = []
     parametres: list[object] = []
+    if evenement_id is not None:
+        clauses.append("e.id = ?")
+        parametres.append(evenement_id)
     if departements:
         clauses.append(f"e.departement IN ({', '.join('?' * len(departements))})")
         parametres.extend(departements)

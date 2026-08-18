@@ -48,7 +48,7 @@ from fundora_prospect.bodacc import rechercher as _rechercher_bodacc
 from fundora_prospect.enrichment import Enrichissement
 from fundora_prospect.enrichment import enrichir as _enrichir_entreprise
 from fundora_prospect.models import Evaluation, LiquidityEvent, StatutEntreprise
-from fundora_prospect.pipeline import _fenetre, repartir
+from fundora_prospect.pipeline import fenetre, repartir
 
 journal = logging.getLogger(__name__)
 
@@ -142,7 +142,7 @@ def balayer(
     Idempotent : relancer sur la meme fenetre met a jour, n'empile pas.
     """
     aujourdhui = aujourdhui or date.today()
-    debut = _fenetre(mois, aujourdhui)
+    debut = fenetre(mois, aujourdhui)
     lot = lot or f"{aujourdhui.isoformat()}-{'-'.join(departements)}"
 
     totaux = {
