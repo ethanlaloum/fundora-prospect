@@ -701,6 +701,11 @@ def test_sorties_distingue_les_bascules_des_SORTIES(base: sqlite3.Connection) ->
     assert charge["transitions_observees"] == 2, "les deux societes ont bascule"
     assert [s["siren"] for s in charge["sorties"]] == ["852872563"], "une seule est sortie"
     assert charge["sorties"][0]["statut_apres"] == "cessee"
+    # Le compteur des sorties est rendu par l'API parce que le front n'a pas le
+    # droit de compter. Le corpus separe les deux grandeurs — 2 bascules, 1
+    # sortie — sans quoi un compteur qui rendrait l'un pour l'autre passerait.
+    assert charge["sorties_observees"] == 1
+    assert charge["sorties_observees"] != charge["transitions_observees"]
 
 
 def test_un_departement_illisible_rend_422(client: TestClient) -> None:

@@ -183,5 +183,6 @@ export interface ReponseSorties {
     statut_apres: string;
     statut_avant: string;
   }>;
+  sorties_observees: number;
   transitions_observees: number;
 }

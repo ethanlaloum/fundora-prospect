@@ -21,6 +21,7 @@ import {
   lireEcartes,
   lireEvenement,
   lireLeads,
+  lireSorties,
 } from "../src/api/client.ts";
 
 const vues: string[] = [];
@@ -94,6 +95,16 @@ assert.equal(vues.at(-1), "/api/evenements/A20260153319");
 repondre({ lead: null, ecarte: null });
 await lireEvenement("A2026 015/3319");
 assert.equal(vues.at(-1), "/api/evenements/A2026%20015%2F3319");
+
+// --- Les sorties du flux : une date, ou rien ---------------------------------
+
+repondre({ sorties: [] });
+await lireSorties("");
+assert.equal(vues.at(-1), "/api/sorties", "sans date, la route rend tout le journal");
+
+repondre({ sorties: [] });
+await lireSorties("2026-04-01");
+assert.equal(vues.at(-1), "/api/sorties?depuis=2026-04-01");
 
 // --- Le refus de l'API est remonte tel quel -----------------------------------
 

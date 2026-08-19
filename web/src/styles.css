@@ -417,6 +417,53 @@ h1 {
   background: var(--fond);
 }
 
+/* --- Les sorties du flux ----------------------------------------------------- */
+
+.sorties {
+  margin: 2.5rem 0 0;
+  padding: 1rem 1.1rem 1.2rem;
+  border: 1px solid var(--trait);
+  border-top: 3px solid var(--attention);
+  border-radius: 0.5rem;
+  background: var(--fond-carte);
+}
+
+.sorties h2 {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.filtre--seul {
+  max-width: 12rem;
+  margin-bottom: 0.75rem;
+}
+
+.sorties-compte {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--encre-douce);
+}
+
+.sorties-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sortie {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--trait);
+  border-left: 3px solid var(--attention);
+  border-radius: 0.4rem;
+  background: var(--fond);
+}
+
 /* --- Le segment du cedant --------------------------------------------------- */
 
 /* Le segment `pp` releve d'une base legale DISTINCTE de celle du segment `pm` :

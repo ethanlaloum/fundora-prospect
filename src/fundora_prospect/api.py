@@ -320,15 +320,24 @@ def collecte(base: Base, departement: str = Query("PACA")) -> dict[str, Any]:
 def sorties(base: Base, depuis: date | None = None) -> dict[str, Any]:
     """Les cedants qui ont cesse, dates — le signal metier du journal.
 
-    `transitions_observees` compte TOUTES les bascules, `sorties` seulement
-    celles qui font sortir du flux. Deux grandeurs, deux noms : les confondre
-    ferait passer un `inconnu -> active` pour un prospect perdu.
+    `transitions_observees` compte TOUTES les bascules, `sorties_observees`
+    seulement celles qui font sortir du flux. Deux grandeurs, deux noms : les
+    confondre ferait passer un `inconnu -> active` pour un prospect perdu.
+
+    `sorties_observees` se deduit de la liste — et c'est justement pourquoi il
+    est rendu. Une surface qui l'obtiendrait en comptant les elements ferait le
+    calcul de son cote, et `tests/test_front_ne_recalcule_rien.py` le refuse :
+    une grandeur affichee vient d'un compteur de l'API, ou la route ne rend pas
+    assez. La regle vaut ici comme ailleurs, meme quand le calcul est trivial —
+    c'est de ne pas avoir d'exception qui la rend applicable.
     """
     toutes = entrepot.transitions(base, depuis=depuis)
+    sortants = [t for t in toutes if t.sortie_du_flux]
     return {
         "depuis": depuis.isoformat() if depuis else None,
         "transitions_observees": len(toutes),
-        "sorties": [_transition(t) for t in toutes if t.sortie_du_flux],
+        "sorties_observees": len(sortants),
+        "sorties": [_transition(t) for t in sortants],
     }
 
 

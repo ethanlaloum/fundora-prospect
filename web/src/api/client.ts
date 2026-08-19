@@ -28,7 +28,12 @@
  * strict fait le reste : un champ que l'API ne rend pas ne compile pas.
  */
 
-import type { ReponseEcartes, ReponseEvenement, ReponseLeads } from "./schema";
+import type {
+  ReponseEcartes,
+  ReponseEvenement,
+  ReponseLeads,
+  ReponseSorties,
+} from "./schema";
 
 /** Le proxy Vite ; l'API elle-meme n'ecoute que sur la boucle locale. */
 const BASE = "/api";
@@ -127,4 +132,19 @@ export function lireEcartes(filtres: Filtres, motif: string): Promise<ReponseEca
  */
 export function lireEvenement(identifiant: string): Promise<ReponseEvenement> {
   return lire<ReponseEvenement>(`/evenements/${encodeURIComponent(identifiant)}`, {});
+}
+
+/**
+ * Les cedants qui ont cesse, dates.
+ *
+ * `depuis` vide n'est pas envoye : la route rend alors tout le journal, ce qui
+ * est son defaut a elle. Le front ne choisit pas de fenetre — il n'en connait
+ * aucune.
+ *
+ * Cette route ne prend PAS les filtres de l'ecran : une sortie du flux est un
+ * fait daté sur un cedant, pas une population de recherche. Lui passer le
+ * departement ou le montant laisserait croire qu'elle en depend.
+ */
+export function lireSorties(depuis: string): Promise<ReponseSorties> {
+  return lire<ReponseSorties>("/sorties", { depuis });
 }

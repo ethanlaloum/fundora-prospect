@@ -2326,6 +2326,34 @@ pas**. La rendre visible demanderait de l'exposer hors de l'OpenAPI. C'est une
 piste, pas une dette cachée : le message d'erreur nomme maintenant le champ, le
 motif et la valeur, ce qui débloque l'utilisateur en un aller-retour.
 
+#### Route 3 ✅ — `/sorties` : la date de sortie du prospect
+
+`active → cessée` date le moment où la société cédante a disparu, donc où le
+produit de cession est descendu aux associés. Un décompte d'écartés dit
+*combien* de sociétés cessées sont refusées ; il ne dit jamais *depuis quand*.
+C'est la seule question que le journal tranche, et elle n'était visible nulle
+part.
+
+**Le manque révélé, encore un compteur.** La route rendait `transitions_observees`
+et la liste des sortants — mais pas le **nombre** de sortants. Afficher « N
+sorties sur M bascules » aurait donc demandé un `.length`, que le verrou refuse.
+`sorties_observees` est ajouté, et le corpus les sépare : 2 bascules, 1 sortie.
+
+Le compteur se déduit de la liste, et c'est précisément pourquoi il est rendu.
+La règle vaut même quand le calcul est trivial — **c'est de n'avoir aucune
+exception qui la rend applicable.**
+
+**Pas de lien vers une fiche depuis une sortie.** Une sortie concerne une
+*société*, la seule route de détail concerne une *annonce*. Fabriquer le lien
+demanderait de choisir laquelle de ses annonces ouvrir — un choix que l'API ne
+fait pas et que le front n'a pas à inventer.
+
+**La fenêtre part vide**, comme les filtres de recherche, et `type="date"` rend
+exactement le format ISO que la route attend : une saisie libre obligerait le
+front à reformater, donc à connaître le format d'un autre module.
+
+Six mutations, six détectées.
+
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
 **Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc

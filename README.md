@@ -25,6 +25,7 @@ La démo tourne **sur le réseau réel**, sans jeu de données figé : environ 1
 dépendances, `demo.sh` s'arrête en disant quoi lancer plutôt que d'échouer en
 cours de route.
 
+
 ---
 
 ## Le raisonnement : du BODACC au prospect

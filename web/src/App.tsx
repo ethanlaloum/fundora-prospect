@@ -37,14 +37,21 @@ import {
   lireEcartes,
   lireEvenement,
   lireLeads,
+  lireSorties,
   type Filtres as Valeurs,
 } from "./api/client";
-import type { ReponseEcartes, ReponseEvenement, ReponseLeads } from "./api/schema";
+import type {
+  ReponseEcartes,
+  ReponseEvenement,
+  ReponseLeads,
+  ReponseSorties,
+} from "./api/schema";
 import { Compteurs } from "./composants/Compteurs";
 import { FicheEvenement } from "./composants/FicheEvenement";
 import { Filtres } from "./composants/Filtres";
 import { ListeEcartes } from "./composants/ListeEcartes";
 import { ListeLeads } from "./composants/ListeLeads";
+import { ListeSorties } from "./composants/ListeSorties";
 import { libelle, valeur } from "./format";
 
 function Requete({ reponse }: { reponse: ReponseLeads }) {
@@ -81,6 +88,10 @@ export function App() {
   const [ficheOuverte, setFicheOuverte] = useState<string | null>(null);
   const [fiche, setFiche] = useState<ReponseEvenement | null>(null);
   const [erreurFiche, setErreurFiche] = useState<string | null>(null);
+
+  const [depuis, setDepuis] = useState("");
+  const [sorties, setSorties] = useState<ReponseSorties | null>(null);
+  const [erreurSorties, setErreurSorties] = useState<string | null>(null);
 
   useEffect(() => {
     // `abandonne` evite qu'une reponse lente ecrase une reponse rapide partie
@@ -156,6 +167,26 @@ export function App() {
     // filtre laisserait croire qu'elle en depend.
   }, [ficheOuverte]);
 
+  useEffect(() => {
+    let abandonne = false;
+    lireSorties(depuis)
+      .then((recue) => {
+        if (abandonne) return;
+        setSorties(recue);
+        setErreurSorties(null);
+      })
+      .catch((souci: unknown) => {
+        if (abandonne) return;
+        setSorties(null);
+        setErreurSorties(souci instanceof Error ? souci.message : String(souci));
+      });
+    return () => {
+      abandonne = true;
+    };
+    // Les sorties ne dependent pas non plus des filtres de recherche : une
+    // sortie du flux est un fait date sur un cedant, pas une population.
+  }, [depuis]);
+
   return (
     <main className="page">
       <header className="entete">
@@ -201,6 +232,11 @@ export function App() {
             <ListeLeads leads={reponse.leads} onFiche={setFicheOuverte} />
           )}
         </>
+      ) : null}
+
+      {erreurSorties ? <p className="erreur">{erreurSorties}</p> : null}
+      {sorties ? (
+        <ListeSorties depuis={depuis} onDepuis={setDepuis} reponse={sorties} />
       ) : null}
     </main>
   );
