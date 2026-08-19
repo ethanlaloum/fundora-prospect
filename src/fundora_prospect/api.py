@@ -76,7 +76,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from fundora_prospect import __version__, entrepot, pipeline
+from fundora_prospect import __version__, agent, entrepot, pipeline
 from fundora_prospect.models import (
     StatutEntreprise,
     presenter_ecarte,
@@ -141,6 +141,31 @@ def connexion() -> Iterator[sqlite3.Connection]:
 
 
 Base = Annotated[sqlite3.Connection, Depends(connexion)]
+
+
+def client_anthropic() -> Any:
+    """Le client du modele, injecte. Voir `connexion` : meme mecanique.
+
+    C'est la racine de composition de la troisieme voie. Sans injection, les
+    tests de `/recherche` devraient soit appeler l'API pour de vrai, soit
+    substituer `agent.analyser` — et substituer la fonction testee revient a ne
+    tester que le cablage.
+    """
+    return agent.client_par_defaut()
+
+
+def executeur() -> Any:
+    """Le pipeline, injecte pour la meme raison.
+
+    `/recherche` est la seule route de cette surface qui declenche le pipeline
+    en direct, donc du reseau. Un test qui ne pourrait pas le substituer
+    devrait joindre le BODACC pour verifier une boucle d'outil.
+    """
+    return pipeline.executer
+
+
+ClientModele = Annotated[Any, Depends(client_anthropic)]
+Executeur = Annotated[Any, Depends(executeur)]
 
 
 @app.exception_handler(ValueError)
@@ -391,6 +416,55 @@ def sorties(base: Base, depuis: date | None = None) -> dict[str, Any]:
         "sorties_observees": len(sortants),
         "sorties": [_transition(t) for t in sortants],
     }
+
+
+class Recherche(BaseModel):
+    """Les memes filtres que `/leads`. C'est ce qui rend les deux voies
+    comparables : un parametre de plus ici et l'ecart mesure ne voudrait plus
+    rien dire."""
+
+    departement: str = "PACA"
+    mois: int = Field(12, ge=1, le=MOIS_MAX)
+    montant_min: float = Field(0.0, ge=0)
+    limite: int = Field(LIMITE_DEFAUT, ge=1, le=LIMITE_MAX)
+
+
+@app.post("/recherche")
+def recherche(corps: Recherche, client: ClientModele, executer: Executeur) -> dict[str, Any]:
+    """**La troisieme voie** : le meme coeur, orchestre par l'API Anthropic.
+
+    ## La seule route de cette surface qui touche au reseau
+
+    L'en-tete de ce module dit « aucune route ne touche au reseau », et c'est
+    toujours vrai des quatre autres. Celle-ci est l'exception, et elle est
+    ecrite plutot que subie : elle appelle `api.anthropic.com` pour
+    l'orchestration, et `pipeline.executer` — donc le BODACC — pour les
+    donnees. C'est la voie du comparatif, pas la voie de production.
+
+    Consequence a assumer : **elle ne lit pas la meme population que
+    `/leads`.** `/leads` relit la base, celle-ci interroge la source en direct,
+    avec le plafond de rapatriement et le budget d'enrichissement que la base
+    a justement supprimes. C'est l'asymetrie deja documentee entre le MCP et
+    l'API, deplacee d'un cran. `/comparatif` separera les deux causes.
+
+    ## Deux choses separees dans la reponse
+
+    `outil` est la sortie du pipeline, telle quelle — c'est ce que le front
+    affiche. `analyse` est le texte du modele, affiche a part et jamais source
+    d'un chiffre. `mesure` porte de quoi comparer : duree, tokens, tours, et
+    les arguments que le modele a REELLEMENT passes a l'outil.
+
+    Voir `agent.py` pour ce qui ne part pas chez Anthropic : ni denomination,
+    ni SIREN.
+    """
+    return agent.analyser(
+        departements=normaliser_departements(corps.departement),
+        mois=corps.mois,
+        montant_min=corps.montant_min,
+        limite=corps.limite,
+        client=client,
+        executer=executer,
+    ).en_dict()
 
 
 class Hypothese(BaseModel):

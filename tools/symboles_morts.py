@@ -127,6 +127,7 @@ class Symbole:
     annote_dans: set[str] = field(default_factory=set)
     attribut_appele_dans: set[str] = field(default_factory=set)
     annote_un_parametre_enregistre_dans: set[str] = field(default_factory=set)
+    confie_a_un_injecteur_dans: set[str] = field(default_factory=set)
 
     @property
     def justification(self) -> str | None:
@@ -140,6 +141,8 @@ class Symbole:
             return f"decore par @{enregistrement[0].split('(')[0]}"
         if self.annote_un_parametre_enregistre_dans:
             return "construit par le framework (parametre d'une fonction enregistree)"
+        if self.confie_a_un_injecteur_dans:
+            return "confie a un injecteur (Depends)"
         return None
 
     @property
@@ -215,6 +218,32 @@ def _annotations_de_parametres_enregistres(arbre: ast.AST) -> set[str]:
     return noms
 
 
+# Les appels qui ENREGISTREENT leur argument au lieu de s'en servir. `Depends(f)`
+# ne fait rien de `f` sur le moment : FastAPI l'appellera a chaque requete. C'est
+# la meme situation que `@serveur.tool` et que l'annotation d'un parametre
+# enregistre — un tiers prend le symbole et l'appelle plus tard.
+#
+# La liste est etroite, et elle doit le rester : `sorted(f)` passe aussi une
+# fonction en argument, et ne justifie rien. Les deux moities sont testees, parce
+# qu'une exemption dont on ne teste que le cote permissif finit par tout
+# justifier.
+INJECTEURS = frozenset({"Depends"})
+
+
+def _confies_a_un_injecteur(arbre: ast.AST) -> set[str]:
+    """Les noms passes a un injecteur, par exemple `Depends(connexion)`."""
+    noms: set[str] = set()
+    for noeud in ast.walk(arbre):
+        if not isinstance(noeud, ast.Call):
+            continue
+        fonction = noeud.func
+        appele = fonction.id if isinstance(fonction, ast.Name) else getattr(fonction, "attr", "")
+        if appele not in INJECTEURS:
+            continue
+        noms.update(a.id for a in noeud.args if isinstance(a, ast.Name))
+    return noms
+
+
 def analyser(racine: Path, symboles: dict[str, Symbole]) -> None:
     """Remplit les usages de chaque symbole, par nature."""
     for dossier in DOSSIERS_ANALYSES:
@@ -230,6 +259,8 @@ def analyser(racine: Path, symboles: dict[str, Symbole]) -> None:
             annotations = _noeuds_d_annotation(arbre)
             for nom in _annotations_de_parametres_enregistres(arbre) & symboles.keys():
                 symboles[nom].annote_un_parametre_enregistre_dans.add(etiquette)
+            for nom in _confies_a_un_injecteur(arbre) & symboles.keys():
+                symboles[nom].confie_a_un_injecteur_dans.add(etiquette)
 
             for noeud in ast.walk(arbre):
                 if isinstance(noeud, ast.Call):

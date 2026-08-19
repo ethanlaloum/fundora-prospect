@@ -18,12 +18,23 @@ set -e
 PYTHON=".venv/bin/python"
 [ -x "$PYTHON" ] || PYTHON="python3"
 
-echo "pre-commit : verification de l'anonymisation des fixtures..."
+echo "pre-commit : anonymisation des fixtures, et aucune clef d'API..."
 
 if ! "$PYTHON" -m pytest tests/test_anonymisation.py -q --no-header; then
     echo
     echo "COMMIT REFUSE : les fixtures ne respectent pas la liste blanche."
     echo "Regenere-les avec :  $PYTHON tools/record_fixtures.py"
+    exit 1
+fi
+
+# Depuis la troisieme voie, le projet a un secret : `ANTHROPIC_API_KEY`. Meme
+# raisonnement que pour les donnees personnelles — git conserve l'historique,
+# donc la seule protection utile intervient AVANT l'ecriture de l'objet.
+if ! "$PYTHON" -m pytest tests/test_secrets.py -q --no-header; then
+    echo
+    echo "COMMIT REFUSE : un secret a ete detecte dans un fichier suivi."
+    echo "Une clef commitee reste exposee meme supprimee au commit suivant."
+    echo "Sors-la du fichier et lis-la dans ANTHROPIC_API_KEY."
     exit 1
 fi
 

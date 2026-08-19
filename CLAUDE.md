@@ -2450,6 +2450,184 @@ chflags nohidden .venv/lib/python3.13/site-packages/*.pth
 **Contournement fiable, et celui à donner** : `export PYTHONPATH="$PWD/src"`.
 Il fonctionne quel que soit l'état de l'installation.
 
+## Phase 8 — trois voies sur un seul cœur
+
+Changement de direction demandé par le client : l'agent doit être déclenchable
+depuis le site, plus seulement depuis Claude Code. **Le livrable est le
+comparatif**, pas la voie 3 seule — le plugin reste pleinement fonctionnel et
+documenté, c'est la première branche de la comparaison, pas du code hérité.
+
+| | Surface | Réseau au moment de la requête |
+|---|---|---|
+| 1 | Claude Code + plugin MCP | BODACC + enrichissement |
+| 2 | `GET /leads` — HTTP direct, sans IA | aucun (relit la base) |
+| 3 | `POST /recherche` — API Anthropic en tool use | Anthropic + BODACC |
+
+**Pas de MCP sur la voie 3.** Le serveur MCP du projet parle en stdio ; l'API
+Anthropic ne peut pas l'atteindre. Les outils sont déclarés en JSON dans
+l'appel, et `pipeline.executer` tourne dans le processus Python. La description
+d'outil vient de `mcp_server.DESCRIPTION_RECHERCHE` — extraite en constante au
+passage, parce que deux prompts pour un même outil divergent toujours sur un
+mot, et le mot qui dérive serait celui qui oriente le modèle vers `"06"` plutôt
+que `6`.
+
+### Étape 1 ✅ — `POST /recherche`
+
+#### Le test adversarial : une assertion d'IMMOBILITÉ
+
+Toutes les autres assertions de ce projet disent « la valeur est celle-ci ».
+Celle-ci dit **« la valeur ne bouge pas »**.
+
+On substitue un client qui rend une prose délibérément fausse — mêmes
+grandeurs, valeurs absurdes, vrais identifiants : *« 3 leads rendus, score
+moyen 12, montant total 42 EUR »* — et on exige que `outil` soit identique à la
+sortie du pipeline appelée directement. Si un seul chiffre affiché venait de la
+prose, il aurait changé.
+
+`assert resultat.outil` passerait dans les deux cas. C'est exactement la
+différence que ce projet paie depuis les six visages : **présence contre
+contenu**, et ici contenu contre *immobilité du contenu*.
+
+**Le garde a des dents dans les deux sens**, et c'est ce qui le rend
+concluant. Un second test contamine volontairement `outil` avec un champ de la
+prose et exige que la comparaison rougisse ; un troisième le fait sur les
+quatre familles de la sortie — la phrase, un scalaire, les compteurs, la liste.
+Sans eux, une comparaison qui ne comparerait rien passerait le premier test
+sans rien garantir.
+
+#### L'identité ne quitte jamais la machine
+
+`cedant_denomination` **est** un nom de personne sur ~20 % des cédants. Le
+SQLite vit hors du dépôt et l'API écoute sur `127.0.0.1` pour cette raison ;
+envoyer les leads entiers à un tiers annulerait la décision d'un cran plus loin.
+
+Le modèle reçoit `id` + faits, rend `par_lead[id]`, et le recollage se fait
+côté serveur. La sélection est une **liste blanche** de champs — jamais une
+liste noire : un champ ajouté demain au lead ne partirait pas par défaut, il
+faudrait l'inscrire. Même règle que l'anonymisation des fixtures, même raison.
+
+**Le test lit le prompt COMPLET** — système, outils, messages, résultats
+d'outil — pas seulement le bloc de données. Un nom qui fuirait par le texte
+système ou par une description d'outil passerait sinon, et ce sont deux
+endroits que personne ne relit en cherchant une donnée personnelle. Sa mutation
+est gardée en permanence : inscrire `cedant` dans la liste blanche doit faire
+rougir le garde, sans quoi on ne distingue pas « aucun nom ne fuit » de « le
+garde ne regarde pas au bon endroit ».
+
+Un quatrième test ferme l'autre moitié : ce qui part est **exactement** ce qui
+est déclaré. Vérifier l'absence des noms laisserait entrer n'importe quel autre
+champ ajouté demain.
+
+#### Ce que le modèle n'analyse pas, et son coût
+
+Sa vraie valeur ajoutée serait le **texte libre** que le parser ignore —
+`origineFonds`, `acte.descriptif`, `activite`. Ce n'est pas fait, et le motif
+n'est pas la difficulté :
+
+- **Ces champs ne sont pas en base.** `evenement` stocke les faits parsés. Les
+  analyser demanderait de les stocker, ou de rappeler le BODACC dans le temps
+  de réponse — ce que le gate Phase 6 interdit.
+- **Deux d'entre eux portent des noms de personnes.** `acte.descriptif` en
+  porte dans 25 annonces sur 99 mesurées, `acte.vente.opposition` porte nom
+  *et* adresse complète.
+
+**La suite identifiée, avec son coût.** Stocker le texte libre **anonymisé à la
+capture** : le recorder sait déjà substituer, il faudrait que la substitution
+soit aussi bonne en production qu'en fixture — donc validée par liste blanche,
+sur une colonne qui accumule. C'est un palier entier, pas une option de
+configuration. Rappeler le BODACC à la volée est écarté : ça contredit la
+décision qui a créé la base.
+
+L'analyse porte donc sur les faits déjà établis. Le comparatif des trois voies
+est le livrable ; la profondeur de l'analyse est la suite.
+
+#### `api.anthropic.com` — le premier domaine qui n'est pas une source
+
+La contrainte 2 borne ce que le projet a le droit de joindre. Les deux domaines
+d'origine sont des **sources de données** ; celui-ci **orchestre**. La
+contrainte 1 encadre la *collecte* — « uniquement des APIs publiques
+documentées » — et un appel au modèle ne rapporte aucune donnée sur un
+prospect : il commente des faits que le cœur a déjà établis, et sa réponse ne
+peut pas entrer dans un lead.
+
+La distinction est écrite dans les deux copies de la whitelist **et dans le
+test**, qui compare désormais `SOURCES | ORCHESTRATEURS` à l'ensemble complet.
+Un test qui mélangerait les deux catégories ferait passer une source pour un
+orchestrateur au premier copier-coller.
+
+#### Le projet a désormais un secret
+
+Jusqu'ici, aucune API du projet ne demandait d'authentification.
+`tests/test_secrets.py` balaye le dépôt et le hook pre-commit l'exécute — même
+raisonnement que pour les données personnelles : **git conserve l'historique**,
+donc la seule protection utile intervient avant l'écriture de l'objet.
+
+Les motifs décrivent des **formes**, pas des valeurs : chercher une clef connue
+ne garderait que celle-là. Cinq tests de dents, dont trois formes qu'aucun
+motif de préfixe seul n'attrape.
+
+**Le verrou a signalé son propre fichier de tests**, et il avait raison :
+l'en-tête PEM y était écrit en clair. Exclure ce fichier du balayage aurait
+créé une cachette permanente pour un vrai secret ; les chaînes d'essai sont
+donc **assemblées**, jamais écrites. Le test de dents a par ailleurs trouvé un
+trou dans le motif : `{"api_key": "…"}` en JSON n'était pas vu, parce que la
+clef y est elle-même entre guillemets.
+
+#### `symboles_morts` gagne une cinquième justification
+
+`client_anthropic` et `executeur` sont des dépendances FastAPI : jamais
+appelées par le dépôt, appelées par le framework à chaque requête. `Depends(f)`
+ne fait rien de `f` sur le moment — c'est un **enregistrement**, la même
+situation que `@serveur.tool`.
+
+Détail qui mérite d'être noté : `connexion` échappait déjà à l'audit, mais **par
+accident** — un homonyme appelé par attribut ailleurs dans le dépôt. La
+tolérance documentée de l'outil (« il lit des noms, il ne résout pas les
+types ») lui donnait une justification qui n'était pas la bonne. Elle est
+maintenant réelle.
+
+Les deux moitiés sont testées : `Depends(f)` justifie, `sorted(f)` non. Une
+exemption dont on ne teste que le côté permissif finit par tout justifier.
+
+#### Deux pièges d'environnement, dont un faux
+
+**Le vrai** : `pip install anthropic` a remis le flag macOS `UF_HIDDEN` sur tout
+`site-packages`, pas seulement sur les `.pth` — le piège documenté plus haut
+n'était qu'un cas particulier. `chflags -R nohidden` sur le répertoire entier.
+
+**Le faux, et il a coûté vingt minutes** : le premier `import anthropic` prenait
+**43 secondes pour 0,46 s de CPU**, et une exécution de trois tests 509
+secondes. Diagnostic tentant : « le SDK est lourd ». `python -X importtime`
+disait 0,65 s ; un `python -c "pass"` nu, 0,07 s. C'était un **cache froid** —
+le second import prend 0,46 s.
+
+La leçon : *une mesure de bout en bout ne dit pas où le temps passe.* Le réflexe
+correct est de mesurer les deux bouts séparément avant de conclure — ici,
+l'interpréteur nu et l'import instrumenté. C'est le même mécanisme que le
+chiffre détaché de son référent, appliqué à une durée.
+
+La passe de mutation qui a suivi l'a confirmé sans qu'on le cherche : neuf
+exécutions de la suite complète, **253 s pour la première et 8 à 9 s pour les
+huit suivantes**. Une expérience naturelle propre — même code, même suite, seul
+l'état du cache change. C'est ce genre de mesure qui tranche, pas la
+plausibilité de l'explication.
+
+Neuf mutations, neuf détectées.
+
+### Étape 2 — `/comparatif` (à venir)
+
+Ce qui reste à trancher, écrit maintenant pour ne pas le redécouvrir : les deux
+voies **ne lisent pas la même population**. `/leads` relit la base ; `/recherche`
+interroge la source en direct, avec le plafond de rapatriement et le budget
+d'enrichissement que la base a justement supprimés. C'est l'asymétrie déjà
+documentée entre le MCP et l'API, déplacée d'un cran.
+
+Un `ecart.identiques` qui comparerait simplement les deux serait donc faux dès
+le premier appel, et pour une raison qui n'a rien à voir avec le modèle. La
+route devra séparer **deux écarts et deux causes** : la voie 3 contre un appel
+direct au pipeline sur les mêmes paramètres — ce qui isole l'effet du modèle —
+et contre `/leads` — ce qui montre l'effet de la population.
+
 ## Si le temps manque
 
 Priorité de coupe, dans cet ordre : Phase 3 enrichissement → Phase 4 serveur

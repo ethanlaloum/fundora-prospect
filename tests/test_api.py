@@ -843,3 +843,69 @@ def test_un_corps_invalide_rend_lui_aussi_un_detail_textuel(client: TestClient) 
     assert isinstance(detail, str), detail
     assert "montant_eur" in detail, detail
     assert "body" not in detail, f"l'origine du champ n'interesse pas l'appelant : {detail!r}"
+
+
+# --- La troisieme voie : /recherche -------------------------------------------
+#
+# Les tests de la boucle elle-meme sont dans `tests/test_agent.py`. Ceux-ci
+# branchent la ROUTE sur le vrai `agent.analyser` — via les deux dependances,
+# comme `connexion` — plutot que de substituer la fonction testee, ce qui
+# reviendrait a ne verifier que le cablage.
+
+
+def _route_agent(client_double: object, executer_double: object) -> TestClient:
+    api.app.dependency_overrides[api.client_anthropic] = lambda: client_double
+    api.app.dependency_overrides[api.executeur] = lambda: executer_double
+    return TestClient(api.app)
+
+
+@pytest.fixture(autouse=True)
+def _nettoyer_les_substitutions() -> Iterator[None]:
+    yield
+    api.app.dependency_overrides.clear()
+
+
+def test_recherche_separe_la_sortie_de_l_outil_et_la_prose(base: sqlite3.Connection) -> None:
+    """L'enveloppe de la troisieme voie : trois clefs, et `outil` n'est pas
+    reconstruit a partir de ce que le modele a dit."""
+    from tests.test_agent import PROSE_MENSONGERE, client_nominal, executer_double
+
+    reponse = _route_agent(client_nominal(), executer_double).post(
+        "/recherche", json={"departement": "06", "limite": 25}
+    )
+    assert reponse.status_code == 200
+    charge = reponse.json()
+
+    assert set(charge) == {"outil", "analyse", "mesure"}
+    # La prose annonce 3 leads et un score de 12 ; la sortie tient bon.
+    assert charge["outil"]["statistiques"]["leads_rendus"] == 2
+    assert charge["outil"]["leads"][0]["score"] == 98.6348
+    assert charge["analyse"]["synthese"] == PROSE_MENSONGERE["synthese"]
+    assert charge["mesure"]["tours"] == 2
+
+
+def test_recherche_rend_les_leads_meme_sans_modele(base: sqlite3.Connection) -> None:
+    """Degradation propre, verifiee a travers la route et pas seulement dans le
+    coeur : une panne d'Anthropic ne coute que le commentaire."""
+    from tests.test_agent import ClientEnPanne, executer_double
+
+    charge = (
+        _route_agent(ClientEnPanne(), executer_double)
+        .post("/recherche", json={"departement": "06"})
+        .json()
+    )
+
+    assert charge["analyse"]["disponible"] is False
+    assert charge["outil"]["leads"], "les leads doivent survivre a la panne"
+
+
+def test_recherche_refuse_un_argument_hors_bornes(base: sqlite3.Connection) -> None:
+    """Memes bornes que `/leads` — sinon l'ecart mesure entre les deux voies ne
+    voudrait plus rien dire."""
+    from tests.test_agent import client_nominal, executer_double
+
+    reponse = _route_agent(client_nominal(), executer_double).post(
+        "/recherche", json={"departement": "06", "limite": 99999}
+    )
+    assert reponse.status_code == 422
+    assert "limite" in reponse.json()["detail"]

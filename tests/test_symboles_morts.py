@@ -241,3 +241,47 @@ def test_les_symboles_prives_sont_hors_perimetre(tmp_path: Path, prive: str) -> 
     est du bruit local, pas un modele fantome dans la specification."""
     depot_factice(tmp_path, f"class {prive}:\n    pass\n")
     assert auditer(tmp_path) == []
+
+
+# --- La cinquieme justification : confie a un injecteur ------------------------
+#
+# FastAPI appelle `client_anthropic` a chaque requete sans que le depot ne
+# l'appelle jamais. `Depends(f)` ne fait rien de `f` sur le moment : c'est un
+# ENREGISTREMENT, la meme situation que `@serveur.tool`.
+#
+# Les deux moities sont testees. Une exemption dont on ne verifie que le cote
+# permissif finit par tout justifier — c'est ce qui est ecrit pour l'exemption
+# precedente, et ca vaut pour celle-ci.
+
+
+def test_un_symbole_confie_a_un_injecteur_est_justifie(tmp_path: Path) -> None:
+    depot_factice(
+        tmp_path,
+        """
+        def ouvrir_connexion():
+            return 1
+        """,
+        consommateur=(
+            "from fastapi import Depends\n"
+            "from paquet.module import ouvrir_connexion\n\n"
+            "Base = Depends(ouvrir_connexion)\n"
+        ),
+    )
+    assert "ouvrir_connexion" not in {s.nom for s in auditer(tmp_path)}
+
+
+def test_un_symbole_passe_a_un_appel_ORDINAIRE_reste_signale(tmp_path: Path) -> None:
+    """L'autre moitie. `sorted(f)` passe aussi une fonction en argument et ne
+    justifie rien : sans ce test, la liste des injecteurs pourrait s'elargir a
+    n'importe quel appel sans que rien ne rougisse."""
+    depot_factice(
+        tmp_path,
+        """
+        def jamais_appelee():
+            return 1
+        """,
+        consommateur=(
+            "from paquet.module import jamais_appelee\n\nx = sorted([jamais_appelee])\n"
+        ),
+    )
+    assert "jamais_appelee" in {s.nom for s in auditer(tmp_path)}

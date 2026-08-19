@@ -49,6 +49,7 @@ from fundora_prospect.pipeline import (
     LIMITE_DEFAUT,
     LIMITE_MAX,
     MOIS_MAX,
+    borne,
     normaliser_departements,
 )
 
@@ -73,14 +74,6 @@ serveur = MCPServer(
 # departement, alias « PACA » — est descendu dans le pipeline.
 
 
-def _borne(valeur: int, nom: str, minimum: int, maximum: int) -> int:
-    if not isinstance(valeur, int) or isinstance(valeur, bool):
-        raise ValueError(f"{nom} doit etre un entier, recu {valeur!r}")
-    if not (minimum <= valeur <= maximum):
-        raise ValueError(f"{nom} doit etre compris entre {minimum} et {maximum}, recu {valeur}")
-    return valeur
-
-
 def _date(brut: str | None, nom: str) -> date | None:
     if brut in (None, ""):
         return None
@@ -93,35 +86,42 @@ def _date(brut: str | None, nom: str) -> date | None:
 
 
 # --- Outils --------------------------------------------------------------------
+#
+# Les descriptions sont des CONSTANTES DE MODULE, pas des litteraux dans le
+# decorateur. Elles sont du prompt, et une seconde surface les consomme :
+# `agent.py` declare le meme outil a l'API Anthropic, qui ne sait rien du MCP.
+# Les recopier la-bas ferait deux prompts qui divergent sur un mot — et le mot
+# qui derive serait, ici, celui qui oriente le modele vers `"06"` plutot que
+# `6`. Un test compare les deux declarations.
 
-
-@serveur.tool(
-    description=(
-        "Recherche les cessions de fonds de commerce publiees au BODACC et rend "
-        "des leads DEJA SCORES et tries, du meilleur au moins bon. Execute tout "
-        "le pipeline : recherche, extraction du prix, identification du cedant, "
-        "verification que la societe cedante est toujours active, et scoring "
-        "explicable.\n\n"
-        "Le prospect rendu est la SOCIETE CEDANTE — celle qui vient d'encaisser "
-        "le produit de la vente.\n\n"
-        "Parametres :\n"
-        '- departement : code a deux chiffres entre guillemets, par exemple "06" '
-        'pour les Alpes-Maritimes ou "13" pour les Bouches-du-Rhone. Ecrire "6" '
-        "fonctionne aussi. Plusieurs departements se separent par une virgule "
-        '("06,13"). L\'alias "PACA" couvre toute la region.\n'
-        "- mois : profondeur de la recherche en mois glissants (defaut 12).\n"
-        "- montant_min : prix de cession minimum en euros (defaut 0).\n"
-        "- limite : nombre maximum de leads rendus (defaut 25, maximum 100).\n\n"
-        "La reponse contient aussi le decompte des annonces ecartees AVEC LEUR "
-        "MOTIF : apport en nature, devise obsolete, societe cedante radiee, acte "
-        "trop ancien. Ces refus font partie du resultat.\n\n"
-        "Chaque lead porte un bloc `provenance` : source, date de collecte, URL "
-        "de l'annonce publiee, et le segment concerne. Les cedants personne "
-        "physique relevent d'un segment distinct de la prospection B2B — le "
-        "bloc le dit, et cette distinction doit etre conservee si les leads "
-        "sont recopies ou resumes."
-    )
+DESCRIPTION_RECHERCHE = (
+    "Recherche les cessions de fonds de commerce publiees au BODACC et rend "
+    "des leads DEJA SCORES et tries, du meilleur au moins bon. Execute tout "
+    "le pipeline : recherche, extraction du prix, identification du cedant, "
+    "verification que la societe cedante est toujours active, et scoring "
+    "explicable.\n\n"
+    "Le prospect rendu est la SOCIETE CEDANTE — celle qui vient d'encaisser "
+    "le produit de la vente.\n\n"
+    "Parametres :\n"
+    '- departement : code a deux chiffres entre guillemets, par exemple "06" '
+    'pour les Alpes-Maritimes ou "13" pour les Bouches-du-Rhone. Ecrire "6" '
+    "fonctionne aussi. Plusieurs departements se separent par une virgule "
+    '("06,13"). L\'alias "PACA" couvre toute la region.\n'
+    "- mois : profondeur de la recherche en mois glissants (defaut 12).\n"
+    "- montant_min : prix de cession minimum en euros (defaut 0).\n"
+    "- limite : nombre maximum de leads rendus (defaut 25, maximum 100).\n\n"
+    "La reponse contient aussi le decompte des annonces ecartees AVEC LEUR "
+    "MOTIF : apport en nature, devise obsolete, societe cedante radiee, acte "
+    "trop ancien. Ces refus font partie du resultat.\n\n"
+    "Chaque lead porte un bloc `provenance` : source, date de collecte, URL "
+    "de l'annonce publiee, et le segment concerne. Les cedants personne "
+    "physique relevent d'un segment distinct de la prospection B2B — le "
+    "bloc le dit, et cette distinction doit etre conservee si les leads "
+    "sont recopies ou resumes."
 )
+
+
+@serveur.tool(description=DESCRIPTION_RECHERCHE)
 def search_liquidity_events(
     # `str | int` et non `str` : le schema JSON refuserait un entier AVANT
     # d'atteindre la normalisation, et un modele ecrit parfois `6` pour le
@@ -133,8 +133,8 @@ def search_liquidity_events(
     limite: int = LIMITE_DEFAUT,
 ) -> dict[str, Any]:
     departements = normaliser_departements(departement)
-    mois = _borne(mois, "mois", 1, MOIS_MAX)
-    limite = _borne(limite, "limite", 1, LIMITE_MAX)
+    mois = borne(mois, "mois", 1, MOIS_MAX)
+    limite = borne(limite, "limite", 1, LIMITE_MAX)
     if montant_min < 0:
         raise ValueError(f"montant_min doit etre positif, recu {montant_min}")
 

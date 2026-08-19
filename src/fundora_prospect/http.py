@@ -21,10 +21,25 @@ from pathlib import Path
 
 import httpx
 
+# Les deux premiers sont des SOURCES DE DONNEES. Le troisieme n'en est pas une,
+# et la distinction merite d'etre ecrite ici parce que le prochain ajout s'y
+# adossera : `api.anthropic.com` ORCHESTRE, il ne collecte rien.
+#
+# La contrainte 1 encadre la collecte — « uniquement des APIs publiques
+# documentees ». Un appel au modele ne rapporte aucune donnee sur un prospect :
+# il commente des faits que le coeur a deja etablis, et sa reponse ne peut pas
+# entrer dans un lead (voir `agent.py`, la separation prose / donnees).
+#
+# Ce qui PART, en revanche, est encadre : l'identite d'un cedant ne quitte
+# jamais la machine — ni denomination, ni SIREN. `cedant_denomination` est un
+# nom de personne sur ~20 % des cedants, et c'est la meme raison qui met le
+# SQLite hors du depot et l'API sur 127.0.0.1. Un test lit le prompt COMPLET
+# emis et echoue si l'un ou l'autre y figure.
 DOMAINES_AUTORISES = frozenset(
     {
         "bodacc-datadila.opendatasoft.com",
         "recherche-entreprises.api.gouv.fr",
+        "api.anthropic.com",
     }
 )
 

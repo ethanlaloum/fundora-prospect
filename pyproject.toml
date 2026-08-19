@@ -27,6 +27,13 @@ web = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
 ]
+# La troisieme voie du comparatif : le pipeline orchestre par l'API Anthropic.
+# Optionnelle pour la meme raison que `web` — ni le plugin Claude Code ni le
+# coeur n'en ont besoin, et un `pip install` nu doit continuer a donner un
+# serveur MCP fonctionnel.
+agent = [
+    "anthropic>=0.40",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
@@ -35,6 +42,9 @@ dev = [
     # `dev` inclut `web` : les tests de l'API font partie de la suite, et une
     # suite qui saute des tests selon ce qui est installe ne prouve rien.
     "fundora-prospect[web]",
+    # `dev` inclut `agent` pour la meme raison qu'il inclut `web` : une suite
+    # qui saute des tests selon ce qui est installe ne prouve rien.
+    "fundora-prospect[agent]",
 ]
 
 [build-system]

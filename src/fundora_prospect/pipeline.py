@@ -93,6 +93,22 @@ PLAFOND_ENRICHISSEMENTS = 200
 # --- Vocabulaire du domaine ---------------------------------------------------
 
 
+def borne(valeur: int, nom: str, minimum: int, maximum: int) -> int:
+    """Valide un entier borne, avec un message qui dit la forme attendue.
+
+    Vivait dans `mcp_server` sous le nom `_borne`, au motif que « ce qui reste
+    la est propre au transport ». Ce motif a expire : `agent.py` valide les
+    memes bornes sur des arguments ecrits par un modele, et deux copies de la
+    meme regle finiraient par diverger sur le message — c'est-a-dire sur la
+    seule chose qui permet au modele de se corriger seul.
+    """
+    if not isinstance(valeur, int) or isinstance(valeur, bool):
+        raise ValueError(f"{nom} doit etre un entier, recu {valeur!r}")
+    if not (minimum <= valeur <= maximum):
+        raise ValueError(f"{nom} doit etre compris entre {minimum} et {maximum}, recu {valeur}")
+    return valeur
+
+
 def normaliser_departements(brut: Any) -> list[str]:
     """Accepte `"06"`, `"6"`, `6`, `"06,13"` et l'alias `"PACA"`.
 
