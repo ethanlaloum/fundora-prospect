@@ -16,7 +16,7 @@
 
 import { strict as assert } from "node:assert";
 
-import { FILTRES_VIDES, lireLeads } from "../src/api/client.ts";
+import { FILTRES_VIDES, lireEcartes, lireLeads } from "../src/api/client.ts";
 
 const vues: string[] = [];
 
@@ -53,6 +53,29 @@ assert.equal(vues.at(-1), "/api/leads?departement=06&limite=5");
 repondre({ leads: [] });
 await lireLeads({ ...FILTRES_VIDES, montant_min: "0" });
 assert.equal(vues.at(-1), "/api/leads?montant_min=0");
+
+// --- Les refus : le motif fait l'aller-retour, intact ------------------------
+//
+// Le motif est une VALEUR du coeur. Le front la recoit dans `statistiques.ecartes`
+// et la renvoie telle quelle : il filtre sur un vocabulaire qu'il ne connait pas.
+// La chaine d'essai porte une espace et une esperluette — deux caracteres qui
+// cassent une concatenation naive d'URL et qu'un encodage correct traverse.
+
+const MOTIF = "motif avec espaces & signes";
+
+repondre({ ecartes: [] });
+await lireEcartes(FILTRES_VIDES, MOTIF);
+assert.equal(
+  vues.at(-1),
+  "/api/ecartes?motif=motif+avec+espaces+%26+signes",
+  `le motif doit partir encode, et vers /ecartes : ${vues.at(-1)}`,
+);
+
+// Les filtres de l'ecran accompagnent le motif : sans eux, la liste des refus
+// decrirait une autre population que le decompte sur lequel on a clique.
+repondre({ ecartes: [] });
+await lireEcartes({ ...FILTRES_VIDES, departement: "06", mois: "6" }, "un-autre-motif");
+assert.equal(vues.at(-1), "/api/ecartes?departement=06&mois=6&motif=un-autre-motif");
 
 // --- Le refus de l'API est remonte tel quel -----------------------------------
 

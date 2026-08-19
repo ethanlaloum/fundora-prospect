@@ -20,14 +20,28 @@
  * cesseront de coincider le jour ou une coupe s'insere entre les deux, et c'est
  * exactement le defaut « le compteur decrit un budget, pas une population » que
  * ce projet a deja paye trois fois.
+ *
+ * ## Deux chargements separes, et deux erreurs separees
+ *
+ * Les refus ne sont pas dans la reponse de `/leads` : les compter et les lister
+ * sont deux questions, et la seconde ne se pose que si on clique. Un echec sur
+ * l'une ne doit pas effacer l'autre — un ecran qui se vide entierement parce
+ * qu'une liste secondaire a echoue fait disparaitre le resume et les compteurs,
+ * c'est-a-dire ce qui permettait de comprendre ce qui se passe.
  */
 
 import { useEffect, useState } from "react";
 
-import { FILTRES_VIDES, lireLeads, type Filtres as Valeurs } from "./api/client";
-import type { ReponseLeads } from "./api/schema";
+import {
+  FILTRES_VIDES,
+  lireEcartes,
+  lireLeads,
+  type Filtres as Valeurs,
+} from "./api/client";
+import type { ReponseEcartes, ReponseLeads } from "./api/schema";
 import { Compteurs } from "./composants/Compteurs";
 import { Filtres } from "./composants/Filtres";
+import { ListeEcartes } from "./composants/ListeEcartes";
 import { ListeLeads } from "./composants/ListeLeads";
 import { libelle, valeur } from "./format";
 
@@ -58,6 +72,10 @@ export function App() {
   const [erreur, setErreur] = useState<string | null>(null);
   const [chargement, setChargement] = useState(true);
 
+  const [motifOuvert, setMotifOuvert] = useState<string | null>(null);
+  const [ecartes, setEcartes] = useState<ReponseEcartes | null>(null);
+  const [erreurEcartes, setErreurEcartes] = useState<string | null>(null);
+
   useEffect(() => {
     // `abandonne` evite qu'une reponse lente ecrase une reponse rapide partie
     // apres elle : l'ecran afficherait alors des chiffres qui ne correspondent
@@ -83,6 +101,29 @@ export function App() {
     };
   }, [filtres]);
 
+  useEffect(() => {
+    if (motifOuvert === null) {
+      setEcartes(null);
+      setErreurEcartes(null);
+      return;
+    }
+    let abandonne = false;
+    lireEcartes(filtres, motifOuvert)
+      .then((recue) => {
+        if (abandonne) return;
+        setEcartes(recue);
+        setErreurEcartes(null);
+      })
+      .catch((souci: unknown) => {
+        if (abandonne) return;
+        setEcartes(null);
+        setErreurEcartes(souci instanceof Error ? souci.message : String(souci));
+      });
+    return () => {
+      abandonne = true;
+    };
+  }, [filtres, motifOuvert]);
+
   return (
     <main className="page">
       <header className="entete">
@@ -93,7 +134,17 @@ export function App() {
         </p>
       </header>
 
-      <Filtres chargement={chargement} onValider={setFiltres} valeurs={filtres} />
+      <Filtres
+        chargement={chargement}
+        onValider={(saisis) => {
+          // Les refus ouverts appartiennent a la recherche precedente : un
+          // motif peut ne plus exister sous les nouveaux filtres, et sa liste
+          // resterait a l'ecran comme si elle decrivait encore quelque chose.
+          setMotifOuvert(null);
+          setFiltres(saisis);
+        }}
+        valeurs={filtres}
+      />
 
       {erreur ? <p className="erreur">{erreur}</p> : null}
 
@@ -101,7 +152,13 @@ export function App() {
         <>
           <p className="resume">{reponse.resume}</p>
           <Requete reponse={reponse} />
-          <Compteurs statistiques={reponse.statistiques} />
+          <Compteurs
+            motifOuvert={motifOuvert}
+            onMotif={(motif) => setMotifOuvert(motif === motifOuvert ? null : motif)}
+            statistiques={reponse.statistiques}
+          />
+          {erreurEcartes ? <p className="erreur">{erreurEcartes}</p> : null}
+          {ecartes ? <ListeEcartes reponse={ecartes} /> : null}
           {reponse.statistiques.leads_rendus === 0 ? (
             <p className="vide">Aucun lead a afficher pour ces filtres.</p>
           ) : (

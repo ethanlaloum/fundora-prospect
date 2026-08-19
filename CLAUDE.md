@@ -2089,6 +2089,81 @@ La survivante est fermée et rejouée : détectée. Elle est arrivée exactement
 la leçon des paliers 4-5 le prédit — sur le seul garde écrit **après** coup, en
 passant, pendant qu'on réparait autre chose.
 
+### Étape 4 — le site complet, route par route
+
+Trois routes à brancher, dans cet ordre : `/ecartes`, `/evenements/{id}`,
+`/sorties`. Arrêt après chacune pour la regarder à l'écran.
+
+#### Route 1 ✅ — `/ecartes` : les pastilles de motif deviennent des filtres
+
+Cliquer un motif charge les cas qui le portent. **Le front propose donc un
+filtre sur un vocabulaire qu'il ne connaît pas** : la clef vient de
+`statistiques.ecartes`, elle repart telle quelle en paramètre. Il fait le
+facteur, pas l'auteur.
+
+Ce que ça débloque : l'auditabilité s'arrêtait au comptage. On lisait qu'un
+motif avait refusé 129 dossiers, on ne pouvait pas dire lesquels. Mesuré sur la
+base réelle (06, 12 mois) : `129 correspondants`, `25 rendus`.
+
+**Un écarté n'a pas la forme d'un lead, et ce n'est pas l'affichage qui le
+garantit — c'est l'API.** Elle ne rend ni `score`, ni `provenance`, ni
+`breakdown`, donc le rendu générique ne peut pas les inventer. Le composant
+enfonce le clou avec une mise en forme différente : une fiche de faits, sans
+rang ni dépliage, là où un lead est une ligne classée. Lui donner l'allure d'un
+lead rouvrirait le chemin par lequel quelque chose ressemblant à un lead sort
+sans passer par `provenance.serialiser` — le défaut de la Phase 3 bis, revenu
+par une route d'audit.
+
+**Les deux nombres sont déclarés côte à côte** — `correspondants` et `rendus`,
+tous deux rendus par l'API. Les recalculer depuis la liste donnerait le second
+et jamais le premier : une coupe qui ne se déclare pas se lit comme un résultat.
+
+**Deux chargements séparés, deux erreurs séparées.** Compter les refus et les
+lister sont deux questions, et la seconde ne se pose qu'au clic. Un échec sur la
+liste ne doit pas vider l'écran de son résumé et de ses compteurs — c'est-à-dire
+de ce qui permettait de comprendre ce qui se passe.
+
+#### Le segment `pp` visible, et une fonction pure pour qu'il soit testable
+
+La distinction de base légale se voit désormais sur un lead comme sur un refus.
+La classe est composée à partir du **code** rendu par l'API ; le libellé, lui,
+continue d'arriver par `type_cedant_libelle` et de s'afficher tel quel.
+
+L'expression aurait pu vivre dans le JSX. Elle est dans `format.ts` parce que
+**là elle s'exécute sous test** : `classeSegment("pp") !== classeSegment("pm")`
+est une assertion, une classe montée en ligne dans un composant n'aurait été
+gardée par rien. La mutation « les deux segments reçoivent la même classe » est
+détectée.
+
+**La limite est écrite : le point d'appel reste non gardé.** Passer une
+constante au lieu du champ du lead ferait disparaître la distinction sans
+qu'aucun test ne rougisse. C'est le trou irréductible du JSX non testé, et le
+remède partiel est de n'y laisser que des appels d'une ligne.
+
+#### Le verrou de vocabulaire a mordu deux fois de plus — toujours dans de la prose
+
+Six reformulations depuis l'étape 2, et le décompte est le signal à surveiller :
+
+| Où | Ce qui contenait un motif du cœur |
+|---|---|
+| `main.tsx` | un message d'erreur ordinaire |
+| le commentaire qui expliquait ce message | le mot qu'il disait d'éviter |
+| `styles.css`, définition de couleur | le commentaire nommant le segment |
+| `styles.css`, règle du segment | le commentaire l'expliquant |
+
+**Aucune des six n'était un libellé affiché.** Toutes étaient de la prose *sur*
+le code — commentaires et messages techniques. C'est une information sur le
+verrou : il coûte des reformulations là où il ne protège rien de visible.
+
+Il ne s'ensuit pas qu'il faille le restreindre au texte affichable. La mutation
+« un motif de refus écrit dans la liste des écartés » — un vrai libellé, dans du
+JSX rendu — est détectée par lui et par lui seul. Le coût est dans la prose, la
+garantie est dans l'affichage, et on ne peut pas avoir la seconde sans le
+premier tant que le balayage est textuel. Ce qui ferait basculer la décision est
+un compteur qui s'emballe, pas son existence.
+
+Six mutations, six détectées.
+
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
 **Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc

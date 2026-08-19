@@ -32,7 +32,8 @@
 import { useState } from "react";
 
 import type { ReponseLeads } from "../api/schema";
-import { libelle, valeur } from "../format";
+import { classeSegment, libelle, valeur } from "../format";
+import { Champs } from "./Champs";
 
 type Lead = ReponseLeads["leads"][number];
 
@@ -83,33 +84,20 @@ function Contributions({ lead }: { lead: Lead }) {
   );
 }
 
-function Champs({ entrees }: { entrees: [string, unknown][] }) {
-  return (
-    <dl className="champs">
-      {entrees.map(([cle, brute]) => (
-        <div className="champ" key={cle}>
-          <dt>{libelle(cle)}</dt>
-          <dd>
-            {cle === "url_publication" && typeof brute === "string" ? (
-              <a href={brute} rel="noreferrer" target="_blank">
-                {brute}
-              </a>
-            ) : (
-              valeur(cle, brute)
-            )}
-          </dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
 function Fiche({ lead }: { lead: Lead }) {
   const [ouvert, setOuvert] = useState(false);
   const reste = Object.entries(lead).filter(([cle]) => !RENDUS_AILLEURS.has(cle));
 
   return (
-    <article className={ouvert ? "lead ouvert" : "lead"}>
+    // Le segment du cedant devient une classe, composee a partir de la VALEUR
+    // que l'API rend. Le front n'ecrit ni « pm » ni « pp » : il les recoit. Ce
+    // qui est marque a l'ecran est une distinction de base legale, pas une
+    // nuance de presentation — voir `segment__pp` dans la feuille de style.
+    <article
+      className={["lead", classeSegment(lead.type_cedant), ouvert ? "ouvert" : ""]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <button
         aria-expanded={ouvert}
         className="lead-entete"

@@ -28,7 +28,7 @@
  * strict fait le reste : un champ que l'API ne rend pas ne compile pas.
  */
 
-import type { ReponseLeads } from "./schema";
+import type { ReponseEcartes, ReponseLeads } from "./schema";
 
 /** Le proxy Vite ; l'API elle-meme n'ecoute que sur la boucle locale. */
 const BASE = "/api";
@@ -39,13 +39,17 @@ const BASE = "/api";
  * Pas de conversion en nombre : le front n'a rien a calculer, et une valeur
  * qu'il ne parse pas est une valeur qu'il ne peut pas deformer. La validation
  * appartient a FastAPI, qui la fait deja.
+ *
+ * Un `type` et non une `interface` : `lire` accepte n'importe quel jeu de
+ * parametres textuels, et une interface ne se laisse pas voir comme un
+ * `Record<string, string>`.
  */
-export interface Filtres {
+export type Filtres = {
   departement: string;
   mois: string;
   montant_min: string;
   limite: string;
-}
+};
 
 /** Les champs, dans l'ordre d'affichage. Ce sont des noms de parametres de la
  * route — des clefs, donc, pas des valeurs. */
@@ -63,7 +67,7 @@ interface Refus {
   detail?: unknown;
 }
 
-async function lire<T>(chemin: string, parametres: Filtres): Promise<T> {
+async function lire<T>(chemin: string, parametres: Record<string, string>): Promise<T> {
   const requete = new URLSearchParams();
   for (const [cle, saisie] of Object.entries(parametres)) {
     // Un champ vide n'est pas un filtre : ne pas l'envoyer laisse le defaut du
@@ -88,4 +92,21 @@ async function lire<T>(chemin: string, parametres: Filtres): Promise<T> {
 
 export function lireLeads(filtres: Filtres): Promise<ReponseLeads> {
   return lire<ReponseLeads>("/leads", filtres);
+}
+
+/**
+ * Les evenements REFUSES portant ce motif exact.
+ *
+ * `motif` n'est pas ecrit dans le front : il vient d'une clef d'`ecartes` que
+ * l'API a rendue, et il lui est renvoye tel quel. Le front sert de facteur, pas
+ * d'auteur — c'est ce qui lui permet de proposer un filtre sur un vocabulaire
+ * qu'il ne connait pas.
+ *
+ * Les MEMES filtres que `/leads` sont passes : sans eux, la liste des refus
+ * decrirait une autre population que le decompte sur lequel on vient de
+ * cliquer, et deux nombres cote a cote qui ne parlent pas de la meme chose sont
+ * le defaut signature de ce projet.
+ */
+export function lireEcartes(filtres: Filtres, motif: string): Promise<ReponseEcartes> {
+  return lire<ReponseEcartes>("/ecartes", { ...filtres, motif });
 }

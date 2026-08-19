@@ -24,7 +24,7 @@
 
 import { strict as assert } from "node:assert";
 
-import { compte, libelle, valeur, VIDE } from "../src/format.ts";
+import { classeSegment, compte, libelle, valeur, VIDE } from "../src/format.ts";
 
 // --- La clef, rendue lisible, et rien de plus -------------------------------
 
@@ -76,5 +76,23 @@ assert.notEqual(valeur("score", 98.6348), valeur("score", 98.7348));
 
 // Un compteur de population reste entier et lisible.
 assert.equal(compte(1218).replace(/\D/g, ""), "1218");
+
+// --- Les deux segments ne se confondent pas ----------------------------------
+//
+// Le segment `pp` releve d'une base legale distincte : deux segments qui
+// rendraient la meme classe se ressembleraient a l'ecran, et la distinction
+// disparaitrait sans qu'aucune donnee ne soit fausse.
+
+assert.notEqual(
+  classeSegment("pp"),
+  classeSegment("pm"),
+  "les deux segments doivent recevoir des classes differentes",
+);
+assert.ok(classeSegment("pp").endsWith("pp"), classeSegment("pp"));
+assert.ok(classeSegment("pm").endsWith("pm"), classeSegment("pm"));
+
+// Un code inconnu ne retombe pas silencieusement sur l'un des deux : il porte
+// le sien, et l'ecran montre alors qu'il n'est ni l'un ni l'autre.
+assert.notEqual(classeSegment("inconnu"), classeSegment("pm"));
 
 console.log("format.ts : toutes les assertions passent");

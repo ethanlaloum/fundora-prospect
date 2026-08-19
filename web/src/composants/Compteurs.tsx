@@ -25,6 +25,12 @@
  * Phase 7, et `tests/test_front_sans_vocabulaire.py` echouerait si l'un d'eux
  * etait recopie ici.
  *
+ * Chaque motif est aussi un **filtre** : cliquer dessus renvoie sa propre clef
+ * a `/ecartes`. Le front propose donc un filtre sur un vocabulaire qu'il ne
+ * connait pas — il fait le facteur, pas l'auteur. Sans ce clic, l'auditabilite
+ * s'arretait au comptage : on lisait qu'un motif avait refuse 129 dossiers,
+ * on ne pouvait pas dire lesquels.
+ *
  * La liste vide ne rend rien — et il n'y a pas de cas « aucun refus » a ecrire,
  * parce que le constater demanderait de compter, ce que le front ne fait pas
  * (`tests/test_front_ne_recalcule_rien.py`). La contrainte a simplifie le
@@ -36,7 +42,15 @@ import { compte, libelle } from "../format";
 
 type Statistiques = ReponseLeads["statistiques"];
 
-export function Compteurs({ statistiques }: { statistiques: Statistiques }) {
+interface Props {
+  statistiques: Statistiques;
+  /** Le motif dont les cas sont ouverts, ou rien. */
+  motifOuvert: string | null;
+  /** Rend la clef cliquee — celle du coeur, jamais une reformulation. */
+  onMotif: (motif: string) => void;
+}
+
+export function Compteurs({ statistiques, motifOuvert, onMotif }: Props) {
   const entrees = Object.entries(statistiques);
 
   return (
@@ -62,9 +76,16 @@ export function Compteurs({ statistiques }: { statistiques: Statistiques }) {
 
       <ul className="refus">
         {Object.entries(statistiques.ecartes).map(([motif, combien]) => (
-          <li className="refus-motif" key={motif}>
-            <span className="refus-compte">{compte(combien)}</span>
-            <span className="refus-libelle">{motif}</span>
+          <li key={motif}>
+            <button
+              aria-pressed={motif === motifOuvert}
+              className={motif === motifOuvert ? "refus-motif ouvert" : "refus-motif"}
+              onClick={() => onMotif(motif)}
+              type="button"
+            >
+              <span className="refus-compte">{compte(combien)}</span>
+              <span className="refus-libelle">{motif}</span>
+            </button>
           </li>
         ))}
       </ul>

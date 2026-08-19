@@ -76,3 +76,21 @@ export function valeur(cle: string, brute: unknown): string {
 export function compte(brut: number): string {
   return nombre.format(brut);
 }
+
+/**
+ * La classe qui porte le SEGMENT du cedant.
+ *
+ * Le segment `pp` releve d'une base legale distincte de celle du segment `pm` :
+ * la distinction doit se voir a l'ecran, sur un lead comme sur un refus. Elle
+ * est composee a partir du CODE que l'API rend — le libelle, lui, s'affiche tel
+ * quel et n'est jamais recopie dans le front.
+ *
+ * C'est une fonction et non une expression ecrite dans le JSX pour une raison
+ * precise : ici elle s'execute sous test, la ou une classe montee en ligne dans
+ * un composant ne serait gardee par rien. Ce qui reste non couvert est
+ * l'endroit d'appel — passer une constante au lieu du champ du lead ferait
+ * disparaitre la distinction sans qu'aucun test ne rougisse.
+ */
+export function classeSegment(type_cedant: string): string {
+  return `segment__${type_cedant}`;
+}

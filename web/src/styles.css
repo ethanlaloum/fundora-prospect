@@ -25,6 +25,10 @@
   --trait: #e0ddd6;
   --accent: #1f5c4d;
   --alerte: #8a3324;
+  /* Le segment `pp` : signale, jamais disqualifie. D'ou un ton distinct de
+   * celui des erreurs — ce n'est pas un defaut, c'est une base legale
+   * differente. */
+  --attention: #9a6b1f;
   color-scheme: light;
 }
 
@@ -217,6 +221,8 @@ h1 {
   list-style: none;
 }
 
+/* Chaque motif est un filtre : le libelle vient de l'API, le clic le lui
+ * renvoie. Le front ne connait aucun de ces mots. */
 .refus-motif {
   display: inline-flex;
   align-items: baseline;
@@ -225,7 +231,24 @@ h1 {
   border: 1px solid var(--trait);
   border-radius: 999px;
   background: var(--fond-carte);
+  color: inherit;
+  font: inherit;
   font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.refus-motif:hover {
+  border-color: var(--encre-douce);
+}
+
+.refus-motif.ouvert {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.refus-motif.ouvert .refus-libelle {
+  color: #fff;
 }
 
 .refus-compte {
@@ -235,6 +258,62 @@ h1 {
 
 .refus-libelle {
   color: var(--encre-douce);
+}
+
+/* --- Les refus, listes ------------------------------------------------------- */
+
+.ecartes {
+  margin: 0 0 1.5rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--trait);
+  border-left: 3px solid var(--encre-douce);
+  border-radius: 0.45rem;
+  background: var(--fond-carte);
+}
+
+.ecartes-compte {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--encre-douce);
+}
+
+.ecartes-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Une fiche de faits, pas une ligne classee : un ecarte n'a ni rang, ni score,
+ * ni provenance — l'API n'en rend aucun, et sa mise en forme ne doit pas
+ * suggerer le contraire. */
+.ecarte {
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--trait);
+  border-radius: 0.4rem;
+  background: var(--fond);
+}
+
+/* --- Le segment du cedant --------------------------------------------------- */
+
+/* Le segment `pp` releve d'une base legale DISTINCTE de celle du segment `pm` :
+ * ce n'est pas de la prospection entre societes, et les deux ne se melangent
+ * pas dans un meme export sans le champ qui les separe. La marque visuelle
+ * porte cette distinction-la, pas une nuance de presentation.
+ *
+ * Le selecteur cite le CODE du segment, jamais son libelle. Le libelle est une
+ * valeur du coeur : il arrive par `type_cedant_libelle` et s'affiche tel quel.
+ * L'ecrire ici en ferait une seconde source, et le verrou de vocabulaire l'a
+ * d'ailleurs signale des la premiere execution — dans ce commentaire meme. */
+.segment__pp {
+  border-left: 3px solid var(--attention);
+}
+
+.lead.segment__pp .cellule__type_cedant_libelle .cellule-valeur {
+  font-weight: 600;
+  color: var(--attention);
 }
 
 /* --- Leads ------------------------------------------------------------------ */
