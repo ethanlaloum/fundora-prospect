@@ -1809,6 +1809,113 @@ son « tout vert » ne prouvait rien : **une mutation qui ne s'applique pas est
 une mutation non jouée**, à distinguer d'une survivante. Rejouée avec la bonne
 ancre, elle est détectée.
 
+### Étape 2 ✅ — le socle web, et deux outils versionnés
+
+`web/` : Vite + React + TypeScript, proxy `/api` vers `127.0.0.1:8000`, CSS
+simple. **Écran vide qui compile** — les filtres, les compteurs et la liste
+arrivent à l'étape 3.
+
+#### `tools/muter.py` — l'outil de mutation cesse d'être un script jetable
+
+La mutation est la méthode de vérification centrale de ce projet, et elle était
+jouée par des scripts shell réécrits à chaque fois. L'un d'eux a produit
+exactement le défaut que ce document décrit ailleurs : **une ancre mal indentée,
+donc une mutation jamais appliquée, et un « 595 passed » qui ressemblait à une
+survivante.**
+
+Trois issues désormais, et il en faut trois :
+
+| Issue | Ce qui s'est passé | Verdict |
+|---|---|---|
+| `NON APPLIQUEE` | ancre absente, ambiguë, ou remplacement identique | **erreur d'outil** |
+| `SURVIVANTE` | le code a changé, la suite reste verte | **trou de test** |
+| `DETECTEE` | le code a changé, la suite rougit | attendu |
+
+Les deux premières font échouer le lot pour des raisons **opposées** : l'une dit
+que la mesure n'a pas eu lieu, l'autre qu'elle a eu lieu et qu'elle est
+mauvaise. Les confondre, c'est croire mesurer quand on ne mesure rien. C'est la
+limite anticipée pour `symboles_morts.py` et pas vue pour l'outil de mutation
+lui-même.
+
+**Un second défaut, trouvé en s'en servant : l'outil était muet.** Il
+n'imprimait qu'à la fin, après cinq lancements de la suite complète. Plusieurs
+minutes sans une ligne — indistinguable d'un blocage, et tué avant d'avoir fini.
+Chaque verdict est maintenant publié au fil de l'eau avec son temps écoulé.
+*Un outil silencieux pendant qu'il travaille finit par ne plus être lancé*,
+exactement comme un audit qui crie au loup finit désactivé.
+
+#### `tools/exporter_types.py` — les types du front, générés
+
+Trois façons de typer les réponses côté front, deux mauvaises :
+
+- **à la main** — une copie du modèle Python qui dérivera ;
+- **depuis l'OpenAPI** — inutilisable : les routes rendent `dict[str, Any]`,
+  donc le schéma dit `{"type": "object"}`. Y remédier demanderait des modèles
+  Pydantic de réponse, c'est-à-dire recopier la forme de `serialiser` ailleurs ;
+- **depuis des réponses réelles**, retenu. `tests/test_types_web.py` régénère et
+  échoue si le fichier est périmé — même mécanique que l'exemple de `SKILL.md`.
+
+**Le contrôle du corpus dégénéré, et ce qu'il a trouvé sur lui-même.** Un type
+déduit d'un corpus qui n'exerce pas un champ est faux exactement comme une
+assertion l'était. À sa première exécution, le contrôle a signalé **sept
+champs** : le second balayage du corpus faisait cesser *toutes* les sociétés, et
+le seul lead restant était celui sans SIREN — donc `siren`, `code_ape`,
+`section_ape` et `lead` sortaient typés `null`.
+
+Deux formes de dégénérescence, et il faut les deux : un champ toujours `null`,
+et un tableau toujours vide — dans les deux cas le corpus n'a rien appris.
+
+**La limite, écrite parce qu'elle est réelle :** le contrôle voit les champs
+*toujours* nuls, pas les champs *jamais* nuls. Un champ nullable dans la réalité
+mais renseigné partout dans le corpus sortira non-nullable, et rien ne le dira.
+C'est au corpus d'exercer la nullabilité là où elle existe — d'où l'annonce
+`PETIT`, écartée *et* sans acte datable *et* sans SIREN.
+
+**`statistiques.ecartes` sort en `Record<string, number>`.** En déduire un champ
+par motif écrirait les libellés de refus dans le fichier généré, donc dans
+`web/src` — la duplication que le front s'interdit. Le verrou de vocabulaire
+sert de filet, puisqu'il balaye aussi le fichier généré.
+
+#### Le verrou de vocabulaire, et sa friction immédiate
+
+`tests/test_front_sans_vocabulaire.py` balaye **tout `web/src`** — composants,
+constantes, styles, types générés — et le vocabulaire interdit est **dérivé du
+cœur en le faisant tourner**, jamais recopié : chaque qualification via
+`motif_ecart_faits`, les refus de statut via `classer`, les libellés via
+`TypeCedant`. Un motif ajouté demain est couvert le jour même.
+
+Les frontières de mots comptent : sans elles « apport » serait trouvé dans
+« rapport ». Avec elles, « apport en nature » est bien signalé — il *contient*
+le mot.
+
+**Il a mordu deux fois en deux minutes, sur du français ordinaire.** D'abord
+`main.tsx`, qui disait « element #racine **absent** de index.html » — un message
+d'erreur banal, mais « absent » est un motif du cœur (`Qualification.ABSENT`).
+Puis, après reformulation, **sur le commentaire qui expliquait pourquoi éviter
+ce mot**, lequel contenait le mot.
+
+Choix retenu : **reformuler le front, pas affaiblir le verrou.** Restreindre le
+balayage aux chaînes affichables n'aurait d'ailleurs pas aidé — le message était
+dans une chaîne.
+
+C'est un compromis, pas une évidence, et sa limite est connue : *un audit qui
+crie au loup est désactivé dans la semaine*. Le signal à surveiller est le
+nombre de reformulations subies pour lui plaire. S'il grandit, la bonne réponse
+ne sera pas de tolérer des exceptions une à une, mais de retirer du vocabulaire
+les motifs d'un seul mot courant — en assumant qu'ils ne sont plus gardés.
+
+#### Un paramètre plutôt qu'une globale substituée
+
+Les tests de dents remplaçaient le répertoire balayé par `monkeypatch` sur une
+globale. Ça ne marchait pas — pytest importe le module sous un nom, le patch en
+visait un autre — et **les tests de dents échouaient en silence sur un
+répertoire vide**. Le répertoire est devenu un paramètre : même raison que
+`rechercher` et `enrichir` dans le cœur, et un paramètre ne peut pas rater sa
+cible.
+
+Cinq mutations, cinq détectées, dont le cas demandé — `apport en nature` inséré
+dans le JSX fait rougir le verrou.
+
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
 **Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc

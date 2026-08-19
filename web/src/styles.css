@@ -1,0 +1,36 @@
+:root {
+  --encre: #1a1a1a;
+  --encre-douce: #5c5c5c;
+  --fond: #fbfbf9;
+  --trait: #e0ddd6;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--fond);
+  color: var(--encre);
+  font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.page {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.sous-titre {
+  margin: 0;
+  color: var(--encre-douce);
+}
