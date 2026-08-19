@@ -47,6 +47,21 @@ export interface ReponseEcartes {
 }
 
 export interface ReponseEvenement {
+  ecarte: null | {
+    cedant: string;
+    date_acte: string;
+    date_parution: string;
+    departement: string;
+    devise: string;
+    id: string;
+    montant_eur: number;
+    motif: string;
+    siren: null | string;
+    statut_cedant: string;
+    type_cedant: string;
+    type_cedant_libelle: string;
+    url_publication: string;
+  };
   lead: null | {
     breakdown: Array<{
       critere: string;
@@ -55,11 +70,12 @@ export interface ReponseEvenement {
       points: number;
     }>;
     cedant: string;
-    code_ape: string;
-    date_acte: string;
+    code_ape: null | string;
+    date_acte: null | string;
     date_parution: string;
     date_reference: string;
     departement: string;
+    id: string;
     jours_ecoules: number;
     montant_eur: number;
     provenance: {
@@ -69,15 +85,14 @@ export interface ReponseEvenement {
       url_publication: string;
     };
     score: number;
-    section_ape: string;
-    siren: string;
+    section_ape: null | string;
+    siren: null | string;
     statut_cedant: string;
     statut_motif: string;
     type_cedant: string;
     type_cedant_libelle: string;
     url_publication: string;
   };
-  motif_ecart: null | string;
   revisions: Array<{
     contenu: Record<string, number | string>;
     remplacee_a: string;
@@ -119,6 +134,7 @@ export interface ReponseLeads {
     date_parution: string;
     date_reference: string;
     departement: string;
+    id: string;
     jours_ecoules: number;
     montant_eur: number;
     provenance: {

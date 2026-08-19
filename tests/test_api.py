@@ -546,16 +546,57 @@ def test_un_evenement_ecarte_reste_consultable(client: TestClient) -> None:
     refuse ; c'est le seul endroit ou l'on peut demander pourquoi."""
     charge = client.get("/evenements/APPORT").json()
     assert charge["lead"] is None
-    assert charge["motif_ecart"] == "apport"
+    assert charge["ecarte"]["motif"] == "apport"
+
+
+def test_la_fiche_d_un_refus_porte_de_quoi_le_CONTREDIRE(client: TestClient) -> None:
+    """Un motif seul n'est pas auditable.
+
+    La route ne rendait qu'une chaine : le lecteur voyait « apport » et n'avait
+    aucun moyen d'aller verifier. Un refus doit porter ses faits — le cedant, le
+    montant, les dates — et surtout son `url_publication`, qui est ce qui le
+    rend contestable chez le tiers.
+
+    Les valeurs sont comparees a celles que `/ecartes` rend pour le meme
+    evenement : deux vues d'un meme refus ne doivent pas differer, et seule leur
+    comparaison peut le voir.
+    """
+    fiche = client.get("/evenements/APPORT").json()["ecarte"]
+    liste = client.get("/ecartes", params={"departement": "06", "motif": "apport"}).json()
+    depuis_la_liste = next(e for e in liste["ecartes"] if e["id"] == "APPORT")
+
+    assert fiche == depuis_la_liste
+    assert fiche["url_publication"].startswith("https://")
+    assert fiche["cedant"] and fiche["montant_eur"] > 0
 
 
 def test_un_evenement_retenu_rend_son_lead_complet(client: TestClient) -> None:
     """L'autre moitie : sans elle, une route qui rendrait TOUJOURS `lead: None`
     passerait le test precedent."""
     charge = client.get("/evenements/RETENU").json()
-    assert charge["motif_ecart"] is None
+    assert charge["ecarte"] is None
     assert charge["lead"]["score"] > 0
     assert charge["lead"]["provenance"]["url_publication"].startswith("https://")
+    # Sans lui, la fiche n'est pas atteignable depuis un lead : c'est la clef
+    # que le front met dans le lien.
+    assert charge["lead"]["id"] == "RETENU"
+
+
+@pytest.mark.parametrize("identifiant", ["RETENU", "APPORT"])
+def test_une_fiche_porte_un_lead_OU_un_refus_jamais_les_deux(
+    client: TestClient, identifiant: str
+) -> None:
+    """L'invariant de la route, verifie sur les deux cas.
+
+    Les deux nuls laisseraient une fiche muette sans que rien ne le signale ;
+    les deux renseignes feraient coexister a l'ecran un prospect et son refus.
+    Aucune assertion sur un seul cas ne voit ces deux defauts.
+    """
+    charge = client.get(f"/evenements/{identifiant}").json()
+    assert (charge["lead"] is None) != (charge["ecarte"] is None), (
+        f"{identifiant} : lead={charge['lead'] is not None} "
+        f"ecarte={charge['ecarte'] is not None}"
+    )
 
 
 def test_un_evenement_inconnu_rend_404(client: TestClient) -> None:
@@ -596,10 +637,21 @@ def test_un_evenement_SANS_SIREN_ne_recupere_pas_le_journal_des_autres(
         )
 
     client = TestClient(api.app)
-    assert client.get("/evenements/AVEC").json()["transitions"], "la bascule existe bien"
-    assert client.get("/evenements/SANS").json()["transitions"] == [], (
+    fiche_avec = client.get("/evenements/AVEC").json()
+    fiche_sans = client.get("/evenements/SANS").json()
+
+    assert fiche_avec["transitions"], "la bascule existe bien"
+    assert fiche_sans["transitions"] == [], (
         "sans cedant identifie, aucune transition ne peut lui etre attribuee"
     )
+
+    # La fiche doit dire A QUI le journal se rapporte, sinon une liste vide se
+    # lit comme « cette societe n'a jamais bouge » alors qu'elle veut dire
+    # « aucune societe n'est identifiee ». Le siren est ce qui distingue les
+    # deux, et il doit etre lisible sur la fiche elle-meme.
+    porteur = fiche_sans["lead"] or fiche_sans["ecarte"]
+    assert porteur["siren"] is None
+    assert (fiche_avec["lead"] or fiche_avec["ecarte"])["siren"] == "852872563"
 
 
 def test_collecte_rend_les_compteurs_du_job(client: TestClient) -> None:

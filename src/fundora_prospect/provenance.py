@@ -128,6 +128,16 @@ def serialiser(lead: Lead) -> dict[str, Any]:
 
     event = lead.event
     return {
+        # L'identifiant de l'annonce, c'est-a-dire la clef de la fiche
+        # `/evenements/{id}`. Un lead n'en portait pas alors qu'un ecarte en
+        # portait un (`models.presenter_ecarte`) : un refus etait donc
+        # consultable en detail, un lead retenu ne l'etait pas. L'asymetrie
+        # etait un oubli, pas une decision — le front l'a revelee en cherchant
+        # quoi mettre dans un lien.
+        #
+        # Ce n'est pas une donnee personnelle : c'est la reference de la
+        # publication au BODACC, celle qui figure deja dans `url_publication`.
+        "id": event.id,
         "score": lead.evaluation.score,
         "cedant": event.cedant_denomination,
         "siren": event.cedant_siren,

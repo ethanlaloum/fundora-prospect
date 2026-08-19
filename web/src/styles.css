@@ -260,6 +260,127 @@ h1 {
   color: var(--encre-douce);
 }
 
+/* --- La fiche d'un evenement -------------------------------------------------- */
+
+.fiche {
+  display: block;
+  margin: 1.5rem 0;
+  padding: 1rem 1.1rem 1.2rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.5rem;
+  background: var(--fond-carte);
+}
+
+.fiche-entete {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--trait);
+}
+
+.fiche-entete h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--encre-douce);
+}
+
+.fermer {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--trait);
+  border-radius: 0.3rem;
+  background: none;
+  color: var(--encre-douce);
+  font: inherit;
+  cursor: pointer;
+}
+
+.fiche .lead-detail,
+.fiche-refus {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.fiche-section {
+  margin-top: 1.1rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--trait);
+}
+
+.fiche-section h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--encre-douce);
+}
+
+/* A qui le journal se rapporte. Rendue meme — surtout — quand la section est
+ * vide : c'est la qu'elle distingue « cette societe n'a pas bouge » de
+ * « aucune societe n'est identifiee ». */
+.attribution {
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+  color: var(--encre-douce);
+}
+
+.revisions,
+.transitions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.revision,
+.transition {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--trait);
+  border-radius: 0.4rem;
+  background: var(--fond);
+}
+
+.revision-date {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--encre-douce);
+}
+
+.vers-la-fiche {
+  margin: 0.6rem 0 0;
+}
+
+.lien {
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--trait);
+  border-radius: 0.3rem;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.lien:hover {
+  border-color: var(--accent);
+}
+
+.lead .vers-la-fiche {
+  padding: 0 0.9rem 0.9rem;
+  background: var(--fond);
+}
+
 /* --- Les refus, listes ------------------------------------------------------- */
 
 .ecartes {

@@ -33,7 +33,7 @@ import { useState } from "react";
 
 import type { ReponseLeads } from "../api/schema";
 import { classeSegment, libelle, valeur } from "../format";
-import { Champs } from "./Champs";
+import { DetailLead } from "./DetailLead";
 
 type Lead = ReponseLeads["leads"][number];
 
@@ -47,46 +47,20 @@ const COLONNES = [
   "statut_cedant",
 ] as const;
 
-const COLONNES_CONTRIBUTION = ["critere", "points", "poids", "motif"] as const;
+/** Deja visibles dans l'en-tete de la ligne : les repeter dans le depliage
+ * ferait lire deux fois la meme chose. `id` s'y ajoute — il n'est pas un fait
+ * a lire mais la clef du lien vers la fiche, et il est affiche par le bouton. */
+const DANS_L_ENTETE = new Set<string>([...COLONNES, "id"]);
 
-/** Rendu ailleurs : les colonnes de l'en-tete, les deux sous-objets, et l'URL —
- * que le bloc de provenance porte deja. La provenance est la porte de sortie du
- * lead : c'est elle qui fait foi sur l'URL, pas une copie a cote. */
-const RENDUS_AILLEURS = new Set<string>([
-  ...COLONNES,
-  "breakdown",
-  "provenance",
-  "url_publication",
-]);
-
-function Contributions({ lead }: { lead: Lead }) {
-  return (
-    <table className="breakdown">
-      <thead>
-        <tr>
-          {COLONNES_CONTRIBUTION.map((cle) => (
-            <th key={cle}>{libelle(cle)}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {lead.breakdown.map((contribution) => (
-          <tr key={contribution.critere}>
-            {COLONNES_CONTRIBUTION.map((cle) => (
-              <td className={`contribution__${cle}`} key={cle}>
-                {valeur(cle, contribution[cle])}
-              </td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
+interface Props {
+  leads: ReponseLeads["leads"];
+  /** Ouvre la fiche complete d'un evenement — revisions et transitions
+   * comprises, que la liste ne porte pas. */
+  onFiche: (identifiant: string) => void;
 }
 
-function Fiche({ lead }: { lead: Lead }) {
+function Fiche({ lead, onFiche }: { lead: Lead; onFiche: Props["onFiche"] }) {
   const [ouvert, setOuvert] = useState(false);
-  const reste = Object.entries(lead).filter(([cle]) => !RENDUS_AILLEURS.has(cle));
 
   return (
     // Le segment du cedant devient une classe, composee a partir de la VALEUR
@@ -113,21 +87,24 @@ function Fiche({ lead }: { lead: Lead }) {
       </button>
 
       {ouvert ? (
-        <div className="lead-detail">
-          <Champs entrees={reste} />
-          <Contributions lead={lead} />
-          <Champs entrees={Object.entries(lead.provenance)} />
-        </div>
+        <>
+          <DetailLead lead={lead} masquees={DANS_L_ENTETE} />
+          <p className="vers-la-fiche">
+            <button className="lien" onClick={() => onFiche(lead.id)} type="button">
+              {libelle("id")} {lead.id}
+            </button>
+          </p>
+        </>
       ) : null}
     </article>
   );
 }
 
-export function ListeLeads({ leads }: { leads: ReponseLeads["leads"] }) {
+export function ListeLeads({ leads, onFiche }: Props) {
   return (
     <div className="leads">
       {leads.map((lead) => (
-        <Fiche key={lead.provenance.url_publication} lead={lead} />
+        <Fiche key={lead.id} lead={lead} onFiche={onFiche} />
       ))}
     </div>
   );

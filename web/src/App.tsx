@@ -35,11 +35,13 @@ import { useEffect, useState } from "react";
 import {
   FILTRES_VIDES,
   lireEcartes,
+  lireEvenement,
   lireLeads,
   type Filtres as Valeurs,
 } from "./api/client";
-import type { ReponseEcartes, ReponseLeads } from "./api/schema";
+import type { ReponseEcartes, ReponseEvenement, ReponseLeads } from "./api/schema";
 import { Compteurs } from "./composants/Compteurs";
+import { FicheEvenement } from "./composants/FicheEvenement";
 import { Filtres } from "./composants/Filtres";
 import { ListeEcartes } from "./composants/ListeEcartes";
 import { ListeLeads } from "./composants/ListeLeads";
@@ -75,6 +77,10 @@ export function App() {
   const [motifOuvert, setMotifOuvert] = useState<string | null>(null);
   const [ecartes, setEcartes] = useState<ReponseEcartes | null>(null);
   const [erreurEcartes, setErreurEcartes] = useState<string | null>(null);
+
+  const [ficheOuverte, setFicheOuverte] = useState<string | null>(null);
+  const [fiche, setFiche] = useState<ReponseEvenement | null>(null);
+  const [erreurFiche, setErreurFiche] = useState<string | null>(null);
 
   useEffect(() => {
     // `abandonne` evite qu'une reponse lente ecrase une reponse rapide partie
@@ -124,6 +130,32 @@ export function App() {
     };
   }, [filtres, motifOuvert]);
 
+  useEffect(() => {
+    if (ficheOuverte === null) {
+      setFiche(null);
+      setErreurFiche(null);
+      return;
+    }
+    let abandonne = false;
+    lireEvenement(ficheOuverte)
+      .then((recue) => {
+        if (abandonne) return;
+        setFiche(recue);
+        setErreurFiche(null);
+      })
+      .catch((souci: unknown) => {
+        if (abandonne) return;
+        setFiche(null);
+        setErreurFiche(souci instanceof Error ? souci.message : String(souci));
+      });
+    return () => {
+      abandonne = true;
+    };
+    // La fiche ne depend PAS des filtres : elle designe un cas par son
+    // identifiant, pas une population. La recharger a chaque changement de
+    // filtre laisserait croire qu'elle en depend.
+  }, [ficheOuverte]);
+
   return (
     <main className="page">
       <header className="entete">
@@ -147,6 +179,10 @@ export function App() {
       />
 
       {erreur ? <p className="erreur">{erreur}</p> : null}
+      {erreurFiche ? <p className="erreur">{erreurFiche}</p> : null}
+      {fiche ? (
+        <FicheEvenement onFermer={() => setFicheOuverte(null)} reponse={fiche} />
+      ) : null}
 
       {reponse ? (
         <>
@@ -158,11 +194,11 @@ export function App() {
             statistiques={reponse.statistiques}
           />
           {erreurEcartes ? <p className="erreur">{erreurEcartes}</p> : null}
-          {ecartes ? <ListeEcartes reponse={ecartes} /> : null}
+          {ecartes ? <ListeEcartes onFiche={setFicheOuverte} reponse={ecartes} /> : null}
           {reponse.statistiques.leads_rendus === 0 ? (
             <p className="vide">Aucun lead a afficher pour ces filtres.</p>
           ) : (
-            <ListeLeads leads={reponse.leads} />
+            <ListeLeads leads={reponse.leads} onFiche={setFicheOuverte} />
           )}
         </>
       ) : null}

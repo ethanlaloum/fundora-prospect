@@ -16,7 +16,12 @@
 
 import { strict as assert } from "node:assert";
 
-import { FILTRES_VIDES, lireEcartes, lireLeads } from "../src/api/client.ts";
+import {
+  FILTRES_VIDES,
+  lireEcartes,
+  lireEvenement,
+  lireLeads,
+} from "../src/api/client.ts";
 
 const vues: string[] = [];
 
@@ -36,7 +41,7 @@ function repondre(charge: unknown, status = 200): void {
 
 repondre({ leads: [] });
 await lireLeads(FILTRES_VIDES);
-assert.equal(vues.at(-1), "/api/leads?", `aucun parametre attendu : ${vues.at(-1)}`);
+assert.equal(vues.at(-1), "/api/leads", `aucun parametre attendu : ${vues.at(-1)}`);
 
 repondre({ leads: [] });
 await lireLeads({ ...FILTRES_VIDES, departement: "06" });
@@ -76,6 +81,19 @@ assert.equal(
 repondre({ ecartes: [] });
 await lireEcartes({ ...FILTRES_VIDES, departement: "06", mois: "6" }, "un-autre-motif");
 assert.equal(vues.at(-1), "/api/ecartes?departement=06&mois=6&motif=un-autre-motif");
+
+// --- La fiche d'un evenement : l'identifiant part dans le CHEMIN --------------
+
+repondre({ lead: null, ecarte: null });
+await lireEvenement("A20260153319");
+assert.equal(vues.at(-1), "/api/evenements/A20260153319");
+
+// Un identifiant porteur d'une barre oblique ou d'une espace changerait la
+// route interrogee s'il partait brut — et la reponse serait un 404 plausible
+// plutot qu'une erreur qui se voit.
+repondre({ lead: null, ecarte: null });
+await lireEvenement("A2026 015/3319");
+assert.equal(vues.at(-1), "/api/evenements/A2026%20015%2F3319");
 
 // --- Le refus de l'API est remonte tel quel -----------------------------------
 

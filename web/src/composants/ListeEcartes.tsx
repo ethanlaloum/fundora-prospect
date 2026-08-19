@@ -28,7 +28,14 @@ import type { ReponseEcartes } from "../api/schema";
 import { classeSegment, compte, libelle } from "../format";
 import { Champs } from "./Champs";
 
-export function ListeEcartes({ reponse }: { reponse: ReponseEcartes }) {
+interface Props {
+  reponse: ReponseEcartes;
+  /** Ouvre la fiche complete : revisions du fait et transitions du cedant, que
+   * la liste ne porte pas. */
+  onFiche: (identifiant: string) => void;
+}
+
+export function ListeEcartes({ reponse, onFiche }: Props) {
   return (
     <section className="ecartes">
       <p className="ecartes-compte">
@@ -40,6 +47,11 @@ export function ListeEcartes({ reponse }: { reponse: ReponseEcartes }) {
         {reponse.ecartes.map((ecarte) => (
           <li className={`ecarte ${classeSegment(ecarte.type_cedant)}`} key={ecarte.id}>
             <Champs entrees={Object.entries(ecarte)} />
+            <p className="vers-la-fiche">
+              <button className="lien" onClick={() => onFiche(ecarte.id)} type="button">
+                {libelle("id")} {ecarte.id}
+              </button>
+            </p>
           </li>
         ))}
       </ul>

@@ -2164,6 +2164,90 @@ un compteur qui s'emballe, pas son existence.
 
 Six mutations, six détectées.
 
+#### Route 2 ✅ — `/evenements/{id}` : la fiche d'un cas
+
+Ouverte depuis un lead déplié ou depuis un refus. Elle montre le détail du
+calcul **ou** les faits du refus, les révisions de l'annonce, et les transitions
+de statut du cédant.
+
+##### Le lead ne portait pas son identifiant, l'écarté oui
+
+`presenter_ecarte` rendait `id` depuis toujours, `serialiser` non. Un refus était
+donc consultable en détail, un lead retenu ne l'était pas — asymétrie que
+personne n'avait vue parce qu'aucune surface n'avait encore eu besoin de faire
+un lien. **Le front l'a révélée en cherchant quoi mettre dans un `href`.**
+
+Un test compare désormais les deux vues : un lead et un écarté doivent désigner
+le même événement sous le même nom. Deux mappeurs séparés finissent par diverger,
+et seule leur comparaison le voit.
+
+##### `motif_ecart` est devenu `ecarte`, et ce n'est pas un renommage
+
+La fiche d'un refus ne rendait qu'une chaîne. Le lecteur y voyait « apport » et
+n'avait **aucun moyen d'aller vérifier** : ni cédant, ni montant, ni
+`url_publication`. Un motif seul n'est pas auditable — c'est une affirmation.
+
+Elle rend maintenant la même vue que `/ecartes`, montée par la même
+`presenter_ecarte`, et le test compare les deux : la fiche et la ligne de liste
+doivent être identiques pour le même événement. Le motif y figure **une fois** —
+deux champs le portant seraient deux sources.
+
+L'invariant est verrouillé dans les deux sens, sur les deux cas : **exactement
+un de `lead` et `ecarte` est renseigné.** Les deux nuls laisseraient une fiche
+muette sans que rien ne le signale ; les deux renseignés feraient coexister à
+l'écran un prospect et son refus.
+
+##### La branche `if siren` rendue visible : le journal dit à qui il se rapporte
+
+`transitions` arrive vide dans deux situations sans rapport — le cédant n'a
+jamais changé de statut, ou **aucun cédant n'est identifié**. Le front ne peut
+pas les distinguer, et n'a pas à le faire : il affiche le SIREN auquel le journal
+se rapporte, juste sous le titre de la section, **y compris quand la section est
+vide** — c'est là qu'il porte l'information. Un tiret cadratin à cette place dit
+tout.
+
+Vérifié sur la base réelle : `A20260112167`, un écarté sans SIREN, rend
+`siren: null` et `transitions: []`. La mutation qui retire le `if siren` est
+détectée.
+
+##### Le générateur de types : deux objets séparés par un `null` ne fusionnaient jamais
+
+Trouvé en enrichissant le corpus de `/evenements`. `lead` valait un objet, puis
+`null`, puis `null`, puis un autre objet. Chaque fusion voyait des genres
+différents, empilait un membre de plus, et **les deux objets ne se rencontraient
+jamais** : le type devenait `null | {…} | {…}`, deux formes pour un même champ.
+
+**Le symptôme accusait la mauvaise cause.** Le contrôle annonçait
+« `lead.siren` : jamais renseigné », c'est-à-dire un reproche au *corpus* — alors
+que le corpus l'exerçait, et que c'est l'agrégation qui perdait l'information. On
+pouvait passer un moment à enrichir un corpus déjà suffisant.
+
+C'est une famille à part de ce que ce projet a déjà nommé : les six visages
+décrivent des tests **aveugles**, ici le test voit quelque chose de réel et le
+**nomme mal**. Un message de diagnostic est une hypothèse sur la cause, et une
+hypothèse non vérifiée envoie chercher au mauvais endroit.
+
+`_unir` fusionne désormais les membres de même genre. Deux tests unitaires le
+gardent, et ils sont écrits pour se séparer : l'un vérifie qu'il ne reste
+**qu'une** forme d'objet, l'autre que le message n'accuse plus le corpus.
+
+##### Un même événement change de catégorie selon la route
+
+Le corpus a fait apparaître un point qu'aucun test ne disait : `/evenements/{id}`
+**n'applique aucun seuil de montant**. L'annonce `PETIT`, écartée partout
+ailleurs pour être sous le minimum, y ressort donc en **lead**.
+
+Ce n'est pas un défaut — une fiche répond « voilà ce cas », pas « ce cas
+entre-t-il dans votre recherche ? ». Mais ça rendait le corpus incapable
+d'exercer `ecarte.siren` en nul, et le type sortait non-nullable. D'où
+`APPORT-ANONYME` : un refus qui tient **quel que soit le montant**, sans SIREN.
+
+Rappel de la limite qui l'a rendu nécessaire : le contrôle voit les champs
+*toujours* nuls, jamais ceux qui ne le sont *jamais*. C'est au corpus d'exercer
+la nullabilité là où elle existe.
+
+Sept mutations, sept détectées.
+
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
 **Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc

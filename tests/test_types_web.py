@@ -98,6 +98,48 @@ def test_un_tableau_non_vide_n_est_pas_degenere() -> None:
     assert champs_degeneres(inferer({"liste": [{"dedans": 1}]})) == []
 
 
+def test_deux_objets_separes_par_un_nul_FUSIONNENT_quand_meme() -> None:
+    """**Le defaut trouve en enrichissant le corpus de `/evenements`.**
+
+    `lead` valait un objet, puis `null`, puis `null`, puis un autre objet.
+    Chaque fusion voyait des genres differents, empilait un membre de plus, et
+    les deux objets ne se rencontraient jamais : le type devenait
+    `null | {…} | {…}` — deux formes pour un meme champ.
+
+    Le corpus separe les deux objets sur chaque champ : l'un renseigne ce que
+    l'autre laisse nul. Deux objets identiques ne departageraient rien, et un
+    seul champ ne dirait pas si la fusion est partielle.
+    """
+    fusion = inferer({"lead": {"siren": "852872563", "ape": "56.10A"}})
+    for suivant in (
+        {"lead": None},
+        {"lead": None},
+        {"lead": {"siren": None, "ape": None}},
+    ):
+        fusion = fusionner(fusion, inferer(suivant))
+
+    lead = fusion["champs"]["lead"]
+    objets = [m for m in lead["membres"] if m["genre"] == "objet"]
+    assert len(objets) == 1, f"{len(objets)} formes d'objet pour un meme champ"
+    assert objets[0]["champs"]["siren"]["noms"] == {"string", "null"}
+    assert objets[0]["champs"]["ape"]["noms"] == {"string", "null"}
+
+
+def test_le_message_du_controle_n_accuse_pas_le_corpus_a_tort() -> None:
+    """Le symptome du defaut precedent etait trompeur.
+
+    Le controle annoncait « champ jamais renseigne », c'est-a-dire un reproche
+    au CORPUS — alors que le corpus exercait bien le champ et que c'est
+    l'agregation qui perdait l'information. On aurait pu passer longtemps a
+    enrichir un corpus deja suffisant.
+    """
+    fusion = inferer({"lead": {"siren": "852872563"}})
+    for suivant in ({"lead": None}, {"lead": {"siren": None}}):
+        fusion = fusionner(fusion, inferer(suivant))
+
+    assert champs_degeneres(fusion) == []
+
+
 def test_le_controle_rend_le_CHEMIN_du_champ_fautif(tmp_path: Path) -> None:
     """Un controle qui dirait « corpus degenere » sans dire ou obligerait a
     chercher a la main dans une reponse de plusieurs centaines de lignes."""

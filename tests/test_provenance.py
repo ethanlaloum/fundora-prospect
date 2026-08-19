@@ -30,6 +30,7 @@ from fundora_prospect.models import (
     Provenance,
     StatutEntreprise,
     TypeCedant,
+    presenter_ecarte,
 )
 
 URL = "https://www.bodacc.fr/pages/annonces-commerciales-detail/?q.id=id:A20260153319"
@@ -147,6 +148,47 @@ def test_la_serialisation_porte_les_quatre_champs() -> None:
     assert charge["provenance"]["url_publication"] == URL
     assert charge["provenance"]["date_collecte"] == "2026-08-16"
     assert "BODACC" in charge["provenance"]["source"]
+
+
+def test_la_serialisation_porte_l_identifiant_de_l_annonce() -> None:
+    """Sans lui, un lead n'est pas dereferencable.
+
+    `/evenements/{id}` est la seule route qui reponde a « pourquoi celui-la ? »
+    avec les revisions du fait et les transitions du cedant. Un ecarte portait
+    deja son `id` — un refus etait donc consultable en detail, un lead retenu
+    ne l'etait pas.
+
+    L'assertion porte sur la VALEUR, pas sur la presence : le corpus est choisi
+    pour que l'identifiant ne soit egal a aucun autre champ du lead, sans quoi
+    une permutation de mappeur passerait — c'est la seule erreur qu'un mappeur
+    commet vraiment.
+    """
+    event = fabriquer_event()
+    charge = prov.serialiser(prov.assembler(event, fabriquer_evaluation(event)))
+
+    assert charge["id"] == "A20260153319"
+    assert charge["id"] != charge["url_publication"]
+    assert charge["id"] != charge["siren"]
+    assert charge["id"] != charge["cedant"]
+
+
+def test_les_deux_vues_d_un_evenement_le_designent_PAREIL() -> None:
+    """Un lead et un ecarte doivent porter le meme identifiant sous le meme nom.
+
+    Les deux vues sont montees par deux fonctions distinctes — `serialiser` et
+    `presenter_ecarte`. Deux mappeurs separes finissent par diverger sur un nom
+    ou sur une valeur, et le front les suit par un lien : une fiche ouverte
+    depuis un refus et la meme ouverte depuis un lead doivent aboutir au meme
+    endroit.
+
+    Seule leur COMPARAISON voit ce genre d'ecart. Aucun test d'une vue isolee ne
+    le peut : chacune est verte avec sa propre clef.
+    """
+    event = fabriquer_event()
+    lead = prov.serialiser(prov.assembler(event, fabriquer_evaluation(event)))
+    ecarte = presenter_ecarte(event, "un motif quelconque")
+
+    assert lead["id"] == ecarte["id"] == event.id
 
 
 def test_la_serialisation_conserve_le_lead_et_son_breakdown() -> None:

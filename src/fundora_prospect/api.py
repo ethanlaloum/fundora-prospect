@@ -220,16 +220,32 @@ def ecartes(
 def evenement(evenement_id: str, base: Base) -> dict[str, Any]:
     """Un cas isole, **ecarte compris** — la seule route qui reponde a
     « pourquoi celui-la a-t-il ete refuse ? ». Avec ses revisions et les
-    transitions de statut de son cedant."""
+    transitions de statut de son cedant.
+
+    ## `ecarte` a remplace `motif_ecart`, et ce n'est pas un renommage
+
+    La route ne rendait qu'un motif : une fiche de refus n'avait donc ni cedant,
+    ni montant, ni `url_publication` — c'est-a-dire rien de ce qui rend le refus
+    verifiable. Un lecteur y voyait « apport » et aucun moyen de le contredire.
+
+    Elle rend maintenant la meme vue que `/ecartes`, montee par la meme
+    `presenter_ecarte`. Le motif y figure, une fois : deux champs le portant
+    seraient deux sources, donc une divergence a venir.
+
+    **Exactement un des deux est renseigne**, et un test le verrouille dans les
+    deux sens. Une route qui rendrait les deux nuls laisserait une fiche muette
+    sans que rien ne le signale ; une route qui rendrait les deux ferait
+    coexister a l'ecran un prospect et son refus.
+    """
     stockes = entrepot.evenements(base, evenement_id=evenement_id)
     if not stockes:
         raise HTTPException(status_code=404, detail=f"aucun evenement {evenement_id!r} en base")
     resultat = pipeline.lire(stockes, limite=1)
-    ecartes = resultat.statistiques["ecartes"]
+    refuse = resultat.ecartes[0] if resultat.ecartes else None
     siren = stockes[0].event.cedant_siren
     return {
         "lead": resultat.leads[0] if resultat.leads else None,
-        "motif_ecart": next(iter(ecartes), None),
+        "ecarte": presenter_ecarte(refuse.event, refuse.motif) if refuse else None,
         "revisions": [_revision(r) for r in entrepot.revisions(base, evenement_id=evenement_id)],
         "transitions": [_transition(t) for t in entrepot.transitions(base, siren=siren)]
         if siren

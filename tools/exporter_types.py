@@ -102,6 +102,31 @@ def _membres(type_: dict[str, Any]) -> list[dict[str, Any]]:
     return list(type_["membres"]) if type_["genre"] == "union" else [type_]
 
 
+def _unir(membres: list[dict[str, Any]]) -> dict[str, Any]:
+    """Une union dont les membres de MEME genre sont fusionnes entre eux.
+
+    Sans ce regroupement, l'ordre des echantillons decide du type. Le cas
+    rencontre : `lead` vaut un objet, puis `null`, puis `null`, puis un autre
+    objet. Chaque fusion voyait des genres differents, empilait un membre de
+    plus, et les deux objets ne se rencontraient JAMAIS. Resultat, un type
+    `null | {…} | {…}` — deux formes pour un meme champ — et surtout un controle
+    de degenerescence qui signalait le second objet, dont les champs sont nuls
+    la ou le premier les renseigne.
+
+    Le symptome etait trompeur : il accusait le CORPUS (« champ jamais
+    renseigne ») alors que le corpus l'exercait bien. C'est l'agregation qui
+    perdait l'information, et le message pointait ailleurs.
+    """
+    par_genre: dict[str, dict[str, Any]] = {}
+    for membre in membres:
+        connu = par_genre.get(membre["genre"])
+        par_genre[membre["genre"]] = fusionner(connu, membre) if connu else membre
+    restants = list(par_genre.values())
+    # Une union d'un seul membre n'est pas une union : la rendre telle quelle
+    # produirait `{…}` enveloppe dans un noeud que le rendu traiterait a part.
+    return restants[0] if len(restants) == 1 else {"genre": "union", "membres": restants}
+
+
 def fusionner(gauche: dict[str, Any], droite: dict[str, Any]) -> dict[str, Any]:
     """Fusionne deux types observes.
 
@@ -113,8 +138,7 @@ def fusionner(gauche: dict[str, Any], droite: dict[str, Any]) -> dict[str, Any]:
         # Un noeud d'union, pas deux chaines deja rendues : le rendu doit
         # connaitre son indentation, et l'anticiper produisait des objets
         # imbriques colles a la marge gauche.
-        membres = [*_membres(gauche), *_membres(droite)]
-        return {"genre": "union", "membres": membres}
+        return _unir([*_membres(gauche), *_membres(droite)])
     if gauche["genre"] == "prim":
         return {"genre": "prim", "noms": gauche["noms"] | droite["noms"]}
     if gauche["genre"] == "tableau":
@@ -292,6 +316,11 @@ def capturer() -> dict[str, list[Any]]:
             # Sans lui, le type les annoncerait toujours presents — le controle
             # ne voit que les champs TOUJOURS nuls, pas ceux jamais nuls.
             a("PETIT", siren=None, date_acte=None, montant=1_000.0),
+            # PETIT est ecarte par le SEUIL, et `/evenements/{id}` n'applique
+            # aucun seuil : sur cette route-la, il ressort en lead. Il faut donc
+            # un refus qui tienne quel que soit le montant — un apport — et sans
+            # SIREN, pour que `ecarte.siren` soit nullable sur la fiche aussi.
+            a("APPORT-ANONYME", siren=None, qualification=Qualification.APPORT),
         ]
 
     def enrichir(siren: str, sortante_cessee: bool) -> Enrichissement:
@@ -335,12 +364,19 @@ def capturer() -> dict[str, list[Any]]:
                 client.get("/ecartes", params={**commun, "motif": "apport"}).json(),
             ],
             "ReponseEvenement": [
-                # Trois cas, trois champs qui cessent d'etre vides : un lead
+                # Quatre cas, quatre champs qui cessent d'etre vides : un lead
                 # complet, un refus motive, et un cedant dont le statut a
-                # bascule — seul le dernier fait exister `transitions`.
+                # bascule — seul le troisieme fait exister `transitions`.
                 client.get("/evenements/AVEC-ACTE").json(),
                 client.get("/evenements/APPORT").json(),
                 client.get("/evenements/PHYSIQUE").json(),
+                # Le quatrieme est un refus SANS siren et SANS acte datable :
+                # sans lui, `ecarte.siren` et `ecarte.date_acte` sortent
+                # non-nullables. Le controle de degenerescence ne voit que les
+                # champs TOUJOURS nuls, jamais ceux qui ne le sont jamais —
+                # c'est au corpus d'exercer la nullabilite la ou elle existe.
+                client.get("/evenements/PETIT").json(),
+                client.get("/evenements/APPORT-ANONYME").json(),
             ],
             "ReponseCollecte": [
                 client.get("/collecte", params=commun).json(),

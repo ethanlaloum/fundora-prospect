@@ -28,7 +28,7 @@
  * strict fait le reste : un champ que l'API ne rend pas ne compile pas.
  */
 
-import type { ReponseEcartes, ReponseLeads } from "./schema";
+import type { ReponseEcartes, ReponseEvenement, ReponseLeads } from "./schema";
 
 /** Le proxy Vite ; l'API elle-meme n'ecoute que sur la boucle locale. */
 const BASE = "/api";
@@ -75,7 +75,10 @@ async function lire<T>(chemin: string, parametres: Record<string, string>): Prom
     if (saisie !== "") requete.set(cle, saisie);
   }
 
-  const reponse = await fetch(`${BASE}${chemin}?${requete}`);
+  // Une route sans parametre n'a pas de `?` : la fiche d'un evenement n'en
+  // prend aucun, et une interrogation vide dans une URL d'audit se lit comme
+  // un filtre qu'on aurait oublie de remplir.
+  const reponse = await fetch(`${BASE}${chemin}${requete.size ? `?${requete}` : ""}`);
   const corps: unknown = await reponse.json().catch(() => null);
 
   if (!reponse.ok) {
@@ -109,4 +112,19 @@ export function lireLeads(filtres: Filtres): Promise<ReponseLeads> {
  */
 export function lireEcartes(filtres: Filtres, motif: string): Promise<ReponseEcartes> {
   return lire<ReponseEcartes>("/ecartes", { ...filtres, motif });
+}
+
+/**
+ * La fiche d'un evenement : son lead OU son refus, ses revisions, et les
+ * transitions de statut de son cedant.
+ *
+ * L'identifiant part dans le CHEMIN, donc encode : un `/` ou une espace non
+ * echappes changeraient la route interrogee, et la reponse serait un 404
+ * plausible plutot qu'une erreur qui se voit.
+ *
+ * Aucun filtre n'accompagne la demande — une fiche est un cas precis, pas une
+ * population — d'ou une URL sans interrogation.
+ */
+export function lireEvenement(identifiant: string): Promise<ReponseEvenement> {
+  return lire<ReponseEvenement>(`/evenements/${encodeURIComponent(identifiant)}`, {});
 }
