@@ -709,3 +709,94 @@ def test_un_departement_illisible_rend_422(client: TestClient) -> None:
     reponse = client.get("/leads", params={"departement": "Nice"})
     assert reponse.status_code == 422
     assert "06" in reponse.json()["detail"], "le message doit montrer la forme attendue"
+
+
+# Les DEUX chemins de refus de cette surface, et ils ne se ressemblaient pas.
+#
+# `ValueError` (le vocabulaire du domaine) passe par `_argument_invalide` et
+# rend une chaine. La validation de FastAPI, elle, rendait nativement une LISTE
+# d'objets `{loc, msg, input}` — une autre forme, sous la meme clef, avec le
+# meme code HTTP.
+#
+# Constate en usage reel : une recherche « 06 / Avril / 300k / 500k » affichait
+# « /leads : reponse 422 » au lieu de nommer les trois champs fautifs. Le front
+# n'y pouvait rien — il attendait une chaine, et il en recevait une la moitie du
+# temps.
+REFUS = [
+    ({"departement": "Nice"}, "departement", "le vocabulaire du domaine"),
+    ({"mois": "Avril"}, "mois", "un entier attendu, un mot recu"),
+    ({"montant_min": "300k"}, "montant_min", "un nombre attendu, un raccourci recu"),
+    ({"limite": "500k"}, "limite", "idem sur la limite"),
+    ({"mois": "0"}, "mois", "un entier valide mais hors bornes"),
+    ({"limite": "99999"}, "limite", "au-dela du plafond du coeur"),
+]
+
+
+@pytest.mark.parametrize(("parametres", "champ", "pourquoi"), REFUS)
+def test_tout_refus_rend_un_detail_TEXTUEL_qui_nomme_le_champ(
+    client: TestClient, parametres: dict[str, str], champ: str, pourquoi: str
+) -> None:
+    """**Le contrat que le front consomme : `detail` est une chaine, toujours.**
+
+    Le corpus couvre les deux gestionnaires — sans quoi il ne departagerait
+    rien. Un jeu d'essai qui ne contiendrait que des departements illisibles
+    serait vert avec une surface qui rend une liste sur tous les autres cas.
+
+    Et l'assertion porte sur le CONTENU : une chaine non vide qui ne nomme pas
+    le champ fautif laisse l'utilisateur deviner lequel de ses quatre filtres
+    est en cause.
+    """
+    reponse = client.get("/leads", params=parametres)
+    assert reponse.status_code == 422, pourquoi
+
+    detail = reponse.json()["detail"]
+    assert isinstance(detail, str), (
+        f"detail est un {type(detail).__name__} : le front attend une chaine, "
+        "et il affiche le code HTTP quand il n'en recoit pas"
+    )
+    assert champ in detail, f"le message doit nommer le champ fautif : {detail!r}"
+    # Le champ est nomme comme l'appelant l'a ECRIT, pas comme le framework le
+    # localise. « query.mois » contient bien « mois » — l'assertion precedente
+    # passerait — mais parle un langage que celui qui a rempli le formulaire ne
+    # connait pas.
+    assert "query" not in detail and "body" not in detail, (
+        f"le message parle le langage du framework : {detail!r}"
+    )
+
+
+def test_un_refus_de_validation_cite_la_valeur_RECUE(client: TestClient) -> None:
+    """Nommer le champ ne suffit pas : « mois : doit etre un entier » laisse
+    croire a une regle generale, quand le probleme est la valeur d'un coup.
+
+    Corpus choisi pour que la valeur ne puisse pas apparaitre par hasard : un
+    mot qui ne figure ni dans le nom du champ ni dans le message de la
+    bibliotheque.
+    """
+    detail = client.get("/leads", params={"mois": "Avril"}).json()["detail"]
+    assert "Avril" in detail, detail
+
+
+def test_plusieurs_champs_fautifs_sont_TOUS_nommes(client: TestClient) -> None:
+    """La recherche qui a produit le defaut en portait trois d'un coup.
+
+    N'en nommer qu'un ferait corriger, relancer, echouer encore — trois fois.
+    C'est le corpus degenere applique a un message : un seul champ fautif ne
+    permet pas de distinguer « les nomme tous » de « nomme le premier ».
+    """
+    detail = client.get(
+        "/leads",
+        params={"departement": "06", "mois": "Avril", "montant_min": "300k", "limite": "500k"},
+    ).json()["detail"]
+
+    for champ in ("mois", "montant_min", "limite"):
+        assert champ in detail, f"{champ} manque dans : {detail!r}"
+
+
+def test_un_corps_invalide_rend_lui_aussi_un_detail_textuel(client: TestClient) -> None:
+    """L'autre porte d'entree. `loc` y commence par « body » et non « query » :
+    une extraction du nom de champ qui supposerait la seconde rendrait ici un
+    message decale d'un cran, sans rien casser de visible."""
+    detail = client.post("/hypotheses", json={"montant_eur": 0}).json()["detail"]
+    assert isinstance(detail, str), detail
+    assert "montant_eur" in detail, detail
+    assert "body" not in detail, f"l'origine du champ n'interesse pas l'appelant : {detail!r}"

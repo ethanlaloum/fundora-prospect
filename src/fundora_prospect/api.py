@@ -72,6 +72,7 @@ from datetime import date
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -128,6 +129,52 @@ def _argument_invalide(_: Request, exc: ValueError) -> JSONResponse:
     illisible, par exemple. C'est une faute de l'appelant, pas du serveur :
     422 et le message tel quel, qui dit deja la forme attendue."""
     return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+
+def _rediger_refus(erreurs: list[Any]) -> str:
+    """Les erreurs de validation, en une phrase lisible.
+
+    Trois choses y figurent, et il faut les trois : **le champ** (l'appelant en
+    a saisi quatre, lui dire « valeur invalide » le laisse deviner lequel), **le
+    motif** de la bibliotheque, et **la valeur recue** — sans elle le message se
+    lit comme une regle generale alors qu'il parle d'une saisie precise.
+
+    `loc` commence par l'origine (`query`, `body`) : on la retire pour nommer le
+    champ tel que l'appelant l'a ecrit, en gardant le repli si elle est seule.
+
+    Le motif est celui de pydantic, **verbatim et en anglais**. Le traduire
+    demanderait une table de correspondance vers des messages qu'on ne controle
+    pas : elle serait muette au premier type d'erreur nouveau, et personne ne le
+    verrait. Un message de bibliotheque exact vaut mieux qu'une traduction qui
+    derive.
+    """
+    morceaux = []
+    for erreur in erreurs:
+        chemin = [str(part) for part in erreur.get("loc", ())]
+        champ = ".".join(chemin[1:]) or (chemin[0] if chemin else "requete")
+        morceaux.append(f"{champ} : {erreur.get('msg', '')} (recu {erreur.get('input')!r})")
+    return " ; ".join(morceaux)
+
+
+@app.exception_handler(RequestValidationError)
+def _validation_invalide(_: Request, exc: RequestValidationError) -> JSONResponse:
+    """**Le second chemin de refus, et il ne ressemblait pas au premier.**
+
+    FastAPI rend nativement `detail` sous forme de LISTE d'objets. Meme clef,
+    meme code HTTP, autre forme — et un consommateur qui attend une chaine
+    tombe sur son repli sans savoir pourquoi.
+
+    Constate en usage reel : une recherche « 06 / Avril / 300k / 500k » faisait
+    afficher « /leads : reponse 422 » a la surface web, alors que l'API savait
+    parfaitement que trois champs etaient en cause et lesquels. Le front n'y
+    pouvait rien : il recevait une chaine la moitie du temps.
+
+    **La forme du refus fait partie du contrat**, au meme titre que celle du
+    succes. `detail` est desormais une chaine sur les deux chemins, et un test
+    parametre sur les deux gestionnaires le verrouille — un corpus qui ne
+    couvrirait qu'un seul d'entre eux resterait vert sur l'autre.
+    """
+    return JSONResponse(status_code=422, content={"detail": _rediger_refus(exc.errors())})
 
 
 def _transition(t: entrepot.Transition) -> dict[str, Any]:

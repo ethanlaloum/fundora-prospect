@@ -44,11 +44,15 @@ touche a `web/` a `node`, sans quoi le front ne se construit pas.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+
+from fundora_prospect import api
 
 RACINE = Path(__file__).resolve().parent.parent
 WEB = RACINE / "web"
@@ -67,9 +71,9 @@ def _node() -> str:
     return chemin
 
 
-def _lancer(script: Path, racine: Path) -> subprocess.CompletedProcess[str]:
+def _lancer(script: Path, racine: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603
-        [_node(), *ARGUMENTS, str(script)],
+        [_node(), *ARGUMENTS, str(script), *arguments],
         capture_output=True,
         text=True,
         cwd=racine,
@@ -84,6 +88,60 @@ def test_la_logique_du_front_passe_ses_assertions(nom: str) -> None:
         f"les assertions de `web/tests/{nom}` ont echoue :\n"
         f"{execution.stdout}\n{execution.stderr}"
     )
+
+
+# --- Le pont : une reponse REELLE de l'API, donnee au vrai client -------------
+
+
+@pytest.mark.parametrize(
+    ("parametres", "champs"),
+    [
+        ({"mois": "Avril"}, ["mois"]),
+        # Les trois d'un coup : c'est la recherche qui a produit le defaut, et
+        # un seul champ fautif ne distinguerait pas « les nomme tous » de
+        # « nomme le premier ».
+        (
+            {"departement": "06", "mois": "Avril", "montant_min": "300k", "limite": "500k"},
+            ["mois", "montant_min", "limite"],
+        ),
+        # L'autre gestionnaire — celui du vocabulaire du domaine. Sans lui, le
+        # pont ne couvrirait qu'un des deux chemins de refus, ce qui est
+        # exactement le defaut qu'il doit empecher.
+        ({"departement": "Nice"}, ["departement"]),
+    ],
+)
+def test_le_refus_de_l_API_arrive_intact_a_l_ecran(
+    tmp_path: Path, parametres: dict[str, str], champs: list[str]
+) -> None:
+    """**Le test que l'usage reel a reclame.**
+
+    `client.test.ts` fabriquait ses reponses : il prouvait qu'un `detail`
+    textuel arrive a l'ecran, pas que l'API en produise un. Elle rendait une
+    LISTE sur son chemin de validation, le front tombait sur son repli, et
+    l'ecran affichait « /leads : reponse 422 » sur une recherche
+    « 06 / Avril / 300k / 500k ».
+
+    Aucune mutation du code de production ne pouvait le montrer : le defaut
+    n'etait pas dans le code teste mais dans l'ecart entre l'entree du test et
+    l'entree reelle. Seul un test qui branche les deux le voit.
+
+    Ici, rien n'est fabrique : la reponse vient de l'API, elle est ecrite telle
+    quelle, et c'est le vrai `client.ts` qui la lit.
+    """
+    reponse = TestClient(api.app).get("/leads", params=parametres)
+    assert reponse.status_code == 422, "le corpus doit produire un vrai refus"
+
+    capture = tmp_path / "refus.json"
+    capture.write_text(
+        json.dumps({"statut": reponse.status_code, "corps": reponse.json(), "champs": champs}),
+        encoding="utf-8",
+    )
+
+    execution = _lancer(WEB / "tests" / "refus.test.ts", RACINE, str(capture))
+    assert execution.returncode == 0, f"{execution.stdout}\n{execution.stderr}"
+
+
+# --- Les harnais savent rougir ------------------------------------------------
 
 
 @pytest.mark.parametrize(

@@ -2248,6 +2248,84 @@ la nullabilité là où elle existe.
 
 Sept mutations, sept détectées.
 
+#### Le défaut trouvé en usage réel : `detail` n'avait pas toujours la même forme
+
+Une recherche « 06 / Avril / 300k / 500k » affichait **« /leads : reponse 422 »**
+— le repli du front — alors que l'API savait parfaitement que trois champs
+étaient en cause et lesquels.
+
+**Deux chemins de refus, deux formes sous la même clef.** `_argument_invalide`
+attrape les `ValueError` du vocabulaire du domaine et rend `detail` en
+**chaîne**. La validation de FastAPI, elle, rendait nativement une **liste**
+d'objets `{loc, msg, input}`. Même code HTTP, même clef, autre type — et un
+consommateur qui attend une chaîne tombe sur son repli sans savoir pourquoi.
+
+Le docstring de `client.ts` affirmait pourtant : « le front affiche le refus de
+l'API tel qu'il vient (422 et son `detail`, qui dit déjà la forme attendue) ».
+C'était vrai la moitié du temps.
+
+##### C'est le sixième visage, et il s'est produit exactement comme annoncé
+
+`client.test.ts` fabriquait `{detail: "…"}`. Il prouvait qu'un `detail` textuel
+arrive intact à l'écran — ce qui est vrai — **et rien sur ce que l'API produit**.
+Le contrat validé n'était honoré que par un des deux gestionnaires.
+
+Le passage qui le décrit était déjà écrit dans ce fichier : *« un test dont
+l'entrée est fabriquée ne prouve rien sur la production tant qu'un autre test
+n'a pas branché le même chemin sur la vraie source »*, et *« aucune mutation du
+code de production ne le révèle »*. Les treize mutations de la Phase 6 étape 2 et
+les six de la route 1 n'avaient aucune chance : le défaut n'est pas dans le code
+testé, il est dans l'écart entre l'entrée du test et l'entrée réelle.
+
+**Le signal à surveiller était nommé lui aussi** — « un littéral dans un test qui
+décrit la sortie d'un autre module ». `{detail: "departement illisible : 'xx'"}`
+en était un, écrit de ma main, et je ne l'ai pas vu en le tapant.
+
+##### La correction : la forme du refus fait partie du contrat
+
+Un gestionnaire de `RequestValidationError` rédige les erreurs en une phrase.
+`detail` est désormais une chaîne **sur les deux chemins**.
+
+Trois choses y figurent, et il faut les trois :
+
+| Élément | Sans lui |
+|---|---|
+| le **champ** | l'appelant en a saisi quatre, il devine lequel |
+| le **motif** | il sait que c'est faux, pas pourquoi |
+| la **valeur reçue** | le message se lit comme une règle générale |
+
+Le motif reste celui de pydantic, **verbatim et en anglais**. Une table de
+traduction vers des messages qu'on ne contrôle pas serait muette au premier type
+d'erreur nouveau, et personne ne le verrait — c'est un paramètre recopié qui
+dérive de sa source, appliqué à des libellés.
+
+Le champ est nommé **tel que l'appelant l'a écrit** : `mois`, pas `query.mois`.
+La mutation qui garde le préfixe du framework survivait à une assertion
+`"mois" in detail` — « query.mois » la contient — d'où une assertion de plus.
+
+##### Le pont : un test qui branche vraiment les deux modules
+
+`web/tests/refus.test.ts` ne fabrique rien. `tests/test_front_execute.py`
+interroge la **vraie API**, écrit sa réponse telle quelle dans un fichier, et la
+donne au **vrai `client.ts`**. Le corpus couvre les deux gestionnaires — sans
+quoi le pont ne garderait que la moitié du contrat, ce qui est exactement le
+défaut qu'il doit empêcher.
+
+Vérifié en le cassant : remettre `exc.errors()` fait rougir le pont sur les cas
+de validation et **pas** sur le cas du vocabulaire du domaine. C'est la preuve
+qu'il branche réellement, et qu'il distingue les deux chemins.
+
+Cinq mutations sur la rédaction du refus, cinq détectées.
+
+##### Ce qui reste, et que je n'ai pas corrigé
+
+Le champ s'appelle `mois` et l'utilisateur y a écrit « Avril ». Le libellé est
+une clef prettifiée — le front n'a pas le droit d'inventer « nombre de mois » —
+et l'API porte bien une `description` par paramètre, mais **le front ne la lit
+pas**. La rendre visible demanderait de l'exposer hors de l'OpenAPI. C'est une
+piste, pas une dette cachée : le message d'erreur nomme maintenant le champ, le
+motif et la valeur, ce qui débloque l'utilisateur en un aller-retour.
+
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
 **Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc
