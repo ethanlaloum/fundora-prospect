@@ -36,6 +36,7 @@ import {
   FILTRES_VIDES,
   lireEcartes,
   lireEvenement,
+  lireFiltres,
   lireLeads,
   lireSorties,
   type Filtres as Valeurs,
@@ -43,6 +44,7 @@ import {
 import type {
   ReponseEcartes,
   ReponseEvenement,
+  ReponseFiltres,
   ReponseLeads,
   ReponseSorties,
 } from "./api/schema";
@@ -88,6 +90,11 @@ export function App() {
   const [ficheOuverte, setFicheOuverte] = useState<string | null>(null);
   const [fiche, setFiche] = useState<ReponseEvenement | null>(null);
   const [erreurFiche, setErreurFiche] = useState<string | null>(null);
+
+  // L'aide de saisie : un seul appel, au chargement. Son echec n'est pas
+  // remonte a l'ecran — les champs restent utilisables sans elle, et une
+  // banniere rouge pour une aide manquante ferait croire a une panne.
+  const [aides, setAides] = useState<ReponseFiltres | null>(null);
 
   const [depuis, setDepuis] = useState("");
   const [sorties, setSorties] = useState<ReponseSorties | null>(null);
@@ -169,6 +176,18 @@ export function App() {
 
   useEffect(() => {
     let abandonne = false;
+    lireFiltres()
+      .then((recue) => {
+        if (!abandonne) setAides(recue);
+      })
+      .catch(() => undefined);
+    return () => {
+      abandonne = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let abandonne = false;
     lireSorties(depuis)
       .then((recue) => {
         if (abandonne) return;
@@ -198,6 +217,7 @@ export function App() {
       </header>
 
       <Filtres
+        aides={aides}
         chargement={chargement}
         onValider={(saisis) => {
           // Les refus ouverts appartiennent a la recherche precedente : un

@@ -94,6 +94,26 @@ from fundora_prospect.pipeline import (
 HOTE_DEFAUT = "127.0.0.1"
 PORT_DEFAUT = 8000
 
+# Ce que chaque filtre attend, EN UNITES. Ces textes sont servis par `/filtres`
+# et affiches sous les champs de saisie.
+#
+# Ils sont ici et pas dans le front pour la meme raison que les motifs de refus
+# et les libelles de segment : un nom de champ est une clef, ce qu'il signifie
+# est une valeur. « mois » ne dit pas si l'on attend un nombre ou « Avril », et
+# « limite » ne dit pas si l'on compte des euros ou des leads — les deux
+# confusions ont eu lieu, en usage reel, sur cet ecran.
+#
+# Les bornes ne sont pas recopiees dans ces phrases : elles vivent dans
+# `Query(ge=, le=)` deux lignes plus bas, et une phrase qui les repeterait
+# deriverait au premier elargissement. `/filtres` rend les bornes a part, lues
+# dans le schema.
+DESCRIPTIONS = {
+    "departement": 'Codes separes par des virgules, ou "PACA" pour toute la region.',
+    "mois": "Fenetre glissante, en NOMBRE de mois comptes depuis aujourd'hui.",
+    "montant_min": "Prix de cession plancher, en euros.",
+    "limite": "Nombre de leads rendus, du meilleur au moins bon.",
+}
+
 app = FastAPI(
     title="fundora-prospect",
     version=__version__,
@@ -198,10 +218,12 @@ def _revision(r: entrepot.Revision) -> dict[str, Any]:
 @app.get("/leads")
 def leads(
     base: Base,
-    departement: str = Query("PACA", description='Codes separes par des virgules, ou "PACA".'),
-    mois: int = Query(12, ge=1, le=MOIS_MAX),
-    montant_min: float = Query(0.0, ge=0),
-    limite: int = Query(LIMITE_DEFAUT, ge=1, le=LIMITE_MAX),
+    departement: str = Query("PACA", description=DESCRIPTIONS["departement"]),
+    mois: int = Query(12, ge=1, le=MOIS_MAX, description=DESCRIPTIONS["mois"]),
+    montant_min: float = Query(0.0, ge=0, description=DESCRIPTIONS["montant_min"]),
+    limite: int = Query(
+        LIMITE_DEFAUT, ge=1, le=LIMITE_MAX, description=DESCRIPTIONS["limite"]
+    ),
 ) -> dict[str, Any]:
     """Les leads classes, du meilleur au moins bon, avec le decompte des refus."""
     departements = normaliser_departements(departement)
@@ -297,6 +319,36 @@ def evenement(evenement_id: str, base: Base) -> dict[str, Any]:
         "transitions": [_transition(t) for t in entrepot.transitions(base, siren=siren)]
         if siren
         else [],
+    }
+
+
+@app.get("/filtres")
+def filtres() -> dict[str, Any]:
+    """Ce que chaque filtre attend : son unite, ses bornes, son defaut.
+
+    **Le front ne peut pas l'inventer.** Ses libelles sont des clefs
+    prettifiees — c'est la frontiere de la Phase 7 — et une clef ne dit pas son
+    unite. « mois » a ete rempli avec « Avril », « limite » a ete lue comme des
+    millions d'euros : les deux en usage reel, sur cet ecran.
+
+    Ecrire ces phrases dans le front en ferait des valeurs recopiees, celles qui
+    derivent au premier changement de borne. Elles viennent donc d'ici, avec les
+    bornes **lues dans le schema OpenAPI** plutot que redeclarees : elles y sont
+    deja, mises la par `Query(ge=, le=)`, et une seconde ecriture serait une
+    seconde source.
+    """
+    parametres = app.openapi()["paths"]["/leads"]["get"]["parameters"]
+    return {
+        "filtres": [
+            {
+                "nom": parametre["name"],
+                "description": parametre.get("description", ""),
+                "defaut": parametre["schema"].get("default"),
+                "minimum": parametre["schema"].get("minimum"),
+                "maximum": parametre["schema"].get("maximum"),
+            }
+            for parametre in parametres
+        ]
     }
 
 

@@ -31,6 +31,7 @@
 import type {
   ReponseEcartes,
   ReponseEvenement,
+  ReponseFiltres,
   ReponseLeads,
   ReponseSorties,
 } from "./schema";
@@ -147,4 +148,18 @@ export function lireEvenement(identifiant: string): Promise<ReponseEvenement> {
  */
 export function lireSorties(depuis: string): Promise<ReponseSorties> {
   return lire<ReponseSorties>("/sorties", { depuis });
+}
+
+/**
+ * Ce que chaque filtre attend : son unite, ses bornes, son defaut.
+ *
+ * Le front affiche des clefs prettifiees, et une clef ne dit pas son unite —
+ * « mois » a ete rempli avec « Avril », « limite » lue comme des millions
+ * d'euros. Ces phrases viennent donc de l'API : les ecrire ici en ferait des
+ * valeurs recopiees, qui derivent au premier changement de borne.
+ *
+ * Un seul appel, au chargement : la reponse ne depend d'aucune saisie.
+ */
+export function lireFiltres(): Promise<ReponseFiltres> {
+  return lire<ReponseFiltres>("/filtres", {});
 }

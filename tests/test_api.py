@@ -56,6 +56,7 @@ from fundora_prospect import api, collecte, entrepot, mcp_server
 from fundora_prospect.bodacc import Annonce, Cedant, ResultatRecherche
 from fundora_prospect.enrichment import Enrichissement
 from fundora_prospect.models import StatutEntreprise, TypeCedant
+from fundora_prospect.pipeline import LIMITE_DEFAUT, LIMITE_MAX, MOIS_MAX
 from fundora_prospect.prix import Confiance, PrixCession, Qualification
 from tests.test_mcp_server import appeler
 
@@ -706,6 +707,43 @@ def test_sorties_distingue_les_bascules_des_SORTIES(base: sqlite3.Connection) ->
     # sortie — sans quoi un compteur qui rendrait l'un pour l'autre passerait.
     assert charge["sorties_observees"] == 1
     assert charge["sorties_observees"] != charge["transitions_observees"]
+
+
+def test_filtres_dit_l_UNITE_de_chaque_champ(client: TestClient) -> None:
+    """Le front affiche des clefs prettifiees ; une clef ne dit pas son unite.
+
+    Les deux confusions ont eu lieu en usage reel sur cet ecran : « Avril »
+    saisi dans `mois`, et `limite=25` lu comme 25 millions d'euros. Les tests
+    portent donc sur ce qui les distingue — l'unite nommee — et pas sur la
+    presence d'une description non vide, qui serait satisfaite par n'importe
+    quelle phrase.
+    """
+    par_nom = {f["nom"]: f for f in client.get("/filtres").json()["filtres"]}
+    assert set(par_nom) == {"departement", "mois", "montant_min", "limite"}
+
+    assert "mois" in par_nom["mois"]["description"].lower()
+    assert "nombre" in par_nom["mois"]["description"].lower(), "un nombre, pas un nom de mois"
+    assert "euro" in par_nom["montant_min"]["description"].lower()
+    assert "lead" in par_nom["limite"]["description"].lower(), "des leads, pas des euros"
+
+
+def test_filtres_lit_ses_bornes_DANS_LE_SCHEMA(client: TestClient) -> None:
+    """Les bornes ne sont pas redeclarees : elles viennent de `Query(ge=, le=)`.
+
+    Le test les compare aux constantes du coeur. Une seconde ecriture dans une
+    phrase de description deriverait au premier elargissement de fenetre, et
+    c'est le defaut signature de ce projet applique a une aide de saisie.
+    """
+    par_nom = {f["nom"]: f for f in client.get("/filtres").json()["filtres"]}
+
+    assert par_nom["mois"]["maximum"] == MOIS_MAX
+    assert par_nom["limite"]["maximum"] == LIMITE_MAX
+    assert par_nom["limite"]["defaut"] == LIMITE_DEFAUT
+    assert par_nom["montant_min"]["minimum"] == 0
+    # Le departement n'a pas de borne numerique : un champ sans borne doit
+    # rendre `null`, pas etre absent — sinon le front devrait deviner.
+    assert par_nom["departement"]["maximum"] is None
+    assert par_nom["departement"]["defaut"] == "PACA"
 
 
 def test_un_departement_illisible_rend_422(client: TestClient) -> None:

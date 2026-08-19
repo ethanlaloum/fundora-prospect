@@ -2354,6 +2354,31 @@ front à reformater, donc à connaître le format d'un autre module.
 
 Six mutations, six détectées.
 
+#### `/filtres` — une clef ne dit pas son unité
+
+Deux confusions **en usage réel sur cet écran**, par l'auteur du projet
+lui-même : « Avril » saisi dans `mois`, et `limite=25` lue comme 25 millions
+d'euros. Les deux fois, le champ était correctement nommé et complètement
+ambigu.
+
+C'est la limite de la règle « tout libellé est une clef prettifiée ». Elle
+empêche le front de recopier du vocabulaire, et elle le laisse incapable de dire
+ce qu'un champ attend. La réponse n'est pas d'assouplir la règle mais de **faire
+rendre l'unité par l'API** : `GET /filtres` sert description, défaut et bornes.
+
+**Les bornes sont lues dans le schéma OpenAPI**, pas redéclarées. Elles existent
+déjà, posées par `Query(ge=, le=)` ; les réécrire dans une phrase serait une
+seconde source, qui dériverait au premier élargissement de fenêtre. Un test les
+compare aux constantes du cœur.
+
+L'échec de cet appel n'est **pas** remonté à l'écran : les champs restent
+utilisables sans aide, et une bannière rouge pour une aide manquante ferait
+croire à une panne. Une aide absente gêne, une saisie bloquée empêche.
+
+Cinq mutations, **une survivante au premier passage** — `lireFiltres` n'avait
+aucune assertion node, et pointer la route sur `/leads` passait inaperçu.
+Fermée, rejouée, détectée.
+
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
 **Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc

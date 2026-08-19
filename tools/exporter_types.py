@@ -378,6 +378,10 @@ def capturer() -> dict[str, list[Any]]:
                 client.get("/evenements/PETIT").json(),
                 client.get("/evenements/APPORT-ANONYME").json(),
             ],
+            # Une seule capture suffit : la reponse ne depend d'aucune saisie,
+            # et ses quatre entrees exercent deja les bornes nulles (le
+            # departement n'en a pas) et non nulles (les trois autres).
+            "ReponseFiltres": [client.get("/filtres").json()],
             "ReponseCollecte": [
                 client.get("/collecte", params=commun).json(),
                 # Un departement jamais collecte : c'est ce qui fait exister

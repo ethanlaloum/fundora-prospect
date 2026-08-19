@@ -107,6 +107,16 @@ export interface ReponseEvenement {
   }>;
 }
 
+export interface ReponseFiltres {
+  filtres: Array<{
+    defaut: number | string;
+    description: string;
+    maximum: null | number;
+    minimum: null | number;
+    nom: string;
+  }>;
+}
+
 export interface ReponseHypothese {
   breakdown: Array<{
     critere: string;

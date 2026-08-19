@@ -85,7 +85,7 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  flex: 1 1 8rem;
+  flex: 1 1 11rem;
 }
 
 .filtre-clef {
@@ -102,6 +102,14 @@ h1 {
   background: var(--fond);
   color: inherit;
   font: inherit;
+}
+
+/* L'unite du champ, servie par `/filtres`. Sans elle, « mois » a ete rempli
+ * avec un nom de mois et « limite » lue comme des millions d'euros. */
+.filtre-aide {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--encre-douce);
 }
 
 .filtre-saisie:focus-visible {

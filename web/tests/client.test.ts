@@ -20,6 +20,7 @@ import {
   FILTRES_VIDES,
   lireEcartes,
   lireEvenement,
+  lireFiltres,
   lireLeads,
   lireSorties,
 } from "../src/api/client.ts";
@@ -95,6 +96,12 @@ assert.equal(vues.at(-1), "/api/evenements/A20260153319");
 repondre({ lead: null, ecarte: null });
 await lireEvenement("A2026 015/3319");
 assert.equal(vues.at(-1), "/api/evenements/A2026%20015%2F3319");
+
+// --- L'aide de saisie : une route a elle, sans parametre ---------------------
+
+repondre({ filtres: [] });
+await lireFiltres();
+assert.equal(vues.at(-1), "/api/filtres", "l'aide de saisie ne depend d'aucune saisie");
 
 // --- Les sorties du flux : une date, ou rien ---------------------------------
 
