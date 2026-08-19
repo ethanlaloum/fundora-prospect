@@ -1916,6 +1916,179 @@ cible.
 Cinq mutations, cinq détectées, dont le cas demandé — `apport en nature` inséré
 dans le JSX fait rougir le verrou.
 
+### Étape 3 ✅ — l'écran : filtres, compteurs, liste, dépliage
+
+`GET /leads` et rien d'autre. Un formulaire, une bande de compteurs, une liste
+de fiches dépliables portant le détail du calcul et la provenance.
+
+Lancement, deux commandes :
+
+```sh
+PYTHONPATH="$PWD/src" .venv/bin/python -m fundora_prospect.api   # 127.0.0.1:8000
+cd web && npm run dev                                            # proxy /api
+```
+
+#### Le front ne connaît AUCUN défaut, et c'est ce qui l'empêche de dériver
+
+Les quatre champs de filtre partent **vides**, et un champ vide n'est pas
+envoyé. La première requête ne porte donc aucun paramètre : c'est le cœur qui
+décide de la région, de la fenêtre et de la limite, et l'écran affiche ce qu'il
+a décidé — `departements`, `periode`, `montant_min_eur` viennent de la
+**réponse**, jamais des filtres saisis.
+
+Même chose pour les bornes : pas de `min`/`max` sur les `<input>`. `MOIS_MAX` et
+`LIMITE_MAX` vivent dans le cœur ; les recopier en attributs HTML serait écrire
+des seuils dans le front. Le front envoie ce qu'on saisit et **affiche le refus**
+de l'API tel qu'il vient — un 422 et son `detail`, qui dit déjà la forme
+attendue. Une borne refusée par le serveur ne peut pas diverger de lui.
+
+#### Tout libellé affiché est une CLEF, prettifiée
+
+`libelle(cle)` remplace les tirets bas par des espaces, et c'est tout. Aucune
+table `annonces_publiees -> "Annonces publiées au BODACC"` : elle serait une
+valeur écrite dans le front, donc une copie du vocabulaire du cœur, donc une
+divergence à venir.
+
+Conséquence assumée : les colonnes portent le nom du champ de l'API qui les
+alimente. C'est un peu brut, et c'est exactement ce qu'on veut sur un outil
+d'audit — le lecteur voit quel champ il regarde.
+
+Le composant des compteurs **n'énumère rien** : il parcourt `statistiques` et
+rend ce qu'il y trouve. Un compteur ajouté au cœur apparaît sans qu'une ligne de
+front change, et surtout il **ne peut pas manquer** faute d'avoir été prévu.
+Les deux réserves (`collecte_partielle`, `plafond_atteint`) ne sont montrées que
+vraies — une mise en garde permanente cesse d'être lue.
+
+#### Le second verrou : `tests/test_front_ne_recalcule_rien.py`
+
+Le verrou de vocabulaire garde ce que le front **dit**. Celui-ci garde ce qu'il
+**fait**. Deux règles :
+
+1. **Aucune arithmétique sur un champ numérique de l'API.** La liste de ces
+   champs est lue dans `web/src/api/schema.d.ts` — donc dérivée d'un fichier
+   lui-même généré depuis des réponses réelles. Un champ numérique ajouté demain
+   est couvert le jour où le schéma est régénéré.
+2. **Aucun `.length`.** Compter est un calcul. Toute grandeur affichable doit
+   venir d'un compteur rendu par l'API ; si elle n'existe pas, c'est une route
+   qui ne rend pas assez. La règle est volontairement brutale : un `.length`
+   légitime est indiscernable à la lecture d'un `.length` qui remplace un
+   compteur — et c'est le défaut « le compteur décrit un budget, pas une
+   population », réintroduit dans une autre langue.
+
+Les commentaires sont **retirés avant le balayage**, contrairement au verrou de
+vocabulaire qui les inclut délibérément. Les deux propriétés diffèrent : un
+libellé recopié dans un commentaire finira recopié dans une chaîne, mais **un
+commentaire ne calcule pas**. Le laisser coûterait des faux positifs immédiats
+— `// montant_eur ...` est déjà un `/` suivi d'un nom de champ.
+
+**Le verrou a mordu deux fois, et les deux fois le front a cédé.**
+
+| Ce qu'il a refusé | Ce qu'on a fait |
+|---|---|
+| `colSpan={COLONNES.length}` dans un `<table>` | liste de fiches en grille CSS, sans `colSpan` |
+| `.cellule-montant_eur` — un `-` devant un nom de champ | convention BEM `.cellule__montant_eur` |
+
+Le second cas est un faux positif au sens strict : `-montant_eur` dans un
+sélecteur CSS n'est pas une soustraction. Mais les distinguer demanderait de
+savoir lire le CSS et le JS, pas de chercher un motif — c'est la même limite que
+`symboles_morts.py`, qui lit des noms et ne résout pas les types. Deux
+reformulations, dont une convention de nommage courante : le compteur de
+frictions reste bas, et c'est **lui** le signal à surveiller.
+
+**La limite, écrite parce qu'elle est réelle.** Le verrou voit les accès
+**nommés** : `lead.montant_eur / 1000` est attrapé, `lead[cle] / 1000` ne l'est
+pas. Or les composants accèdent aux champs par clef dynamique. Ce qui rattrape
+ce trou n'est pas le balayage, c'est que toute la mise en forme passe par un
+module unique — et que ce module, lui, s'exécute sous test.
+
+#### Les premiers tests du front qui EXÉCUTENT du code
+
+Les deux verrous sont des balayages : ils lisent, ils n'exécutent pas. Une date
+permutée, un arrondi qui mange un chiffre, une unité collée au mauvais champ
+passeraient tous les contrôles — le code serait conforme à toutes les règles et
+mentirait à l'écran.
+
+Le front n'a pas de lanceur de tests, et en installer un demanderait un aller
+sur le réseau. **Node exécute du TypeScript en retirant les types**, et les deux
+modules porteurs de logique — `format.ts` et `api/client.ts` — sont purs : pas
+de DOM, pas de React, et `fetch` est une globale donc remplaçable. Ils
+s'exécutent tels quels, sans dépendance.
+
+C'est la raison d'avoir tenu la logique **hors** des composants. Un composant se
+vérifie avec un navigateur ; une fonction pure se vérifie avec `node`. Ce qui
+reste non couvert est le rendu JSX, et c'est dit franchement : c'est le coût
+assumé de ne pas installer de navigateur d'essai, et la raison de garder les
+composants sans décision.
+
+Le harnais lui-même est éprouvé : `tests/test_front_execute.py` recopie un
+module, y applique une altération **plausible** — une date bien formée mais
+fausse, une requête valide mais surchargée — et exige l'échec. Un lanceur qui
+rendrait toujours zéro passerait pour un test vert.
+
+#### `web/node_modules` a fait passer la suite de 6 s à plus de 15 minutes
+
+`tests/test_plugin.py` copie le dépôt pour simuler une installation tierce.
+`copytree` ne connaît que les motifs qu'on lui donne : `node_modules` — 66 Mo,
+des milliers de fichiers — y est entré avec le front, cinq fois par exécution.
+
+Le symptôme ressemblait à un blocage : aucune sortie, un processus à 0,02 s de
+CPU, et la suite qui n'arrivait jamais au bout. Il a fallu bisecter fichier par
+fichier pour le nommer.
+
+**Ce n'est pas seulement un désagrément : une suite lente rend impraticable la
+mutation**, qui est la méthode de vérification centrale de ce projet — une passe
+de dix mutations coûte dix exécutions complètes. Le ralentissement n'aurait pas
+cassé un test, il aurait cassé la méthode. C'est le même mécanisme que « un outil
+silencieux pendant qu'il travaille finit par ne plus être lancé », appliqué cette
+fois à la suite elle-même.
+
+La correction n'est pas seulement d'allonger la liste des motifs ignorés — elle
+dériverait au prochain artefact. Un **plafond de fichiers** fait désormais
+échouer la copie en nommant le répertoire coupable. Ce qui ne se déclare pas se
+lit comme un résultat ; ici, ce qui ne se déclarait pas se lisait comme un
+blocage.
+
+#### Un test de dents dont le corpus se déduit du paramètre gardé ne garde rien
+
+Le plafond est arrivé avec son test de dents : fabriquer une arborescence trop
+fournie et exiger l'échec. Il fabriquait `PLAFOND_DE_FICHIERS + 1` fichiers.
+
+**La mutation « plafond porté à 500 000 » a survécu** — le test fabriquait alors
+500 001 fichiers et dépassait encore. Il ne pouvait prendre en défaut **aucune**
+valeur de la constante qu'il prétendait garder.
+
+C'est le corpus dégénéré du projet, appliqué à un paramètre : *un corpus qui se
+recalcule depuis la chose gardée s'adapte à toutes ses valeurs.* Le nombre est
+désormais écrit en clair (`FICHIERS_FABRIQUES = 600`), ce qui a un effet
+volontaire : relever le plafond au-delà casse le test, donc devient une décision
+argumentée et non le réflexe de quelqu'un que la garde dérange.
+
+Détail qui mérite d'être noté : **la durée était le symptôme**. Cette mutation a
+mis 158 secondes là où les dix autres en prenaient 7 — parce que le plafond
+relevé laissait `node_modules` revenir dans les copies. Le verdict disait
+« survivante » ; le chronomètre disait pourquoi.
+
+#### Douze mutations, une survivante au premier passage
+
+| Mutation | Premier passage |
+|---|---|
+| un motif de refus recopié dans le front | détectée |
+| un compteur de l'API remplacé par un `.length` | détectée |
+| une division sur un montant rendu par l'API | détectée |
+| le verrou ne connaît plus que l'addition | détectée |
+| le retrait des commentaires rase tout le fichier | détectée |
+| une date permutée | détectée |
+| l'unité collée au mauvais champ | détectée |
+| le score arrondi à l'entier | détectée |
+| les filtres vides sont envoyés quand même | détectée |
+| le refus de l'API est reformulé par le front | détectée |
+| les artefacts d'outillage rentrent dans la copie du plugin | détectée |
+| **le plafond de fichiers est désactivé** | **survivante** |
+
+La survivante est fermée et rejouée : détectée. Elle est arrivée exactement là où
+la leçon des paliers 4-5 le prédit — sur le seul garde écrit **après** coup, en
+passant, pendant qu'on réparait autre chose.
+
 ### L'asymétrie de population entre les deux surfaces — écrite exprès
 
 **Le serveur MCP reste en direct ; l'API lit la base. Les deux ne verront donc
