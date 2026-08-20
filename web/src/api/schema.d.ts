@@ -19,97 +19,6 @@ export interface ReponseCollecte {
   reserve: null | string;
 }
 
-export interface ReponseComparatif {
-  analyse: {
-    disponible: boolean;
-    par_lead: Record<string, string>;
-    reserve: null | string;
-    synthese: string;
-  };
-  effet_du_modele: {
-    arguments_respectes: boolean;
-    identiques: boolean;
-    meme_ordre: boolean;
-    seulement_comparee: string[];
-    seulement_reference: string[];
-  };
-  fraicheur_de_la_base: {
-    disponible: boolean;
-    identiques: boolean;
-    meme_ordre: boolean;
-    reserve: string;
-    seulement_comparee: string[];
-    seulement_reference: string[];
-  };
-  leads: Array<{
-    breakdown: Array<{
-      critere: string;
-      motif: string;
-      poids: number;
-      points: number;
-    }>;
-    cedant: string;
-    code_ape: string;
-    date_acte: null | string;
-    date_parution: string;
-    date_reference: string;
-    departement: string;
-    id: string;
-    jours_ecoules: number;
-    montant_eur: number;
-    provenance: {
-      base_legale: string;
-      date_collecte: string;
-      source: string;
-      url_publication: string;
-    };
-    score: number;
-    section_ape: string;
-    siren: null | string;
-    statut_cedant: string;
-    statut_motif: string;
-    type_cedant: string;
-    type_cedant_libelle: string;
-    url_publication: string;
-  }>;
-  parametres: {
-    departement: string;
-    limite: number;
-    mois: number;
-    montant_min: number;
-  };
-  voies: {
-    agent: {
-      ids: string[];
-      mesure: {
-        appels_outil: Record<string, number | string>[];
-        duree_ms: number;
-        ids_rendus: string[];
-        leads_rendus: number;
-        modele: string;
-        tokens_cache_lus: number;
-        tokens_entree: number;
-        tokens_sortie: number;
-        tours: number;
-      };
-    };
-    base: {
-      ids: string[];
-      mesure: {
-        duree_ms: number;
-        leads_rendus: number;
-      };
-    };
-    direct: {
-      ids: string[];
-      mesure: {
-        duree_ms: number;
-        leads_rendus: number;
-      };
-    };
-  };
-}
-
 export interface ReponseEcartes {
   correspondants: number;
   departements: string[];
@@ -271,6 +180,78 @@ export interface ReponseLeads {
     leads_rendus: number;
     plafond_atteint: boolean;
     sans_cedant_ou_illisibles: number;
+  };
+}
+
+export interface ReponseRecherche {
+  analyse: {
+    disponible: boolean;
+    par_lead: Record<string, string>;
+    reserve: null | string;
+    synthese: string;
+  };
+  mesure: {
+    appels_outil: Record<string, number | string>[];
+    duree_ms: number;
+    ids_rendus: string[];
+    modele: string;
+    tokens_cache_lus: number;
+    tokens_entree: number;
+    tokens_sortie: number;
+    tours: number;
+  };
+  outil: {
+    departements: string[];
+    leads: Array<{
+      breakdown: Array<{
+        critere: string;
+        motif: string;
+        poids: number;
+        points: number;
+      }>;
+      cedant: string;
+      code_ape: string;
+      date_acte: null | string;
+      date_parution: string;
+      date_reference: string;
+      departement: string;
+      id: string;
+      jours_ecoules: number;
+      montant_eur: number;
+      provenance: {
+        base_legale: string;
+        date_collecte: string;
+        source: string;
+        url_publication: string;
+      };
+      score: number;
+      section_ape: string;
+      siren: null | string;
+      statut_cedant: string;
+      statut_motif: string;
+      type_cedant: string;
+      type_cedant_libelle: string;
+      url_publication: string;
+    }>;
+    montant_min_eur: number;
+    periode: {
+      debut: string;
+      fin: string;
+    };
+    resume: string;
+    statistiques: {
+      annonces_exploitables: number;
+      annonces_publiees: number;
+      annonces_rapatriees: number;
+      candidats_avant_enrichissement: number;
+      candidats_non_enrichis: number;
+      classables_parmi_les_enrichis: number;
+      ecartes: Record<string, number>;
+      enrichis: number;
+      leads_rendus: number;
+      plafond_atteint: boolean;
+      sans_cedant_ou_illisibles: number;
+    };
   };
 }
 

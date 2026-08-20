@@ -66,10 +66,12 @@ CHEMINS_DICTIONNAIRES = frozenset(
         # d'annonce, pas des champs. En deduire un champ par identifiant
         # ecrirait le corpus dans le fichier genere, et le front croirait a un
         # schema fixe.
-        "ReponseComparatif.analyse.par_lead",
+        "ReponseRecherche.analyse.par_lead",
+        "ReponseRecherche.outil.statistiques.ecartes",
+        "ReponseRecherche.voies.agent.mesure.appels_outil[]",
         # Idem : les clefs sont les noms des parametres que le MODELE a passes.
         # Il peut en omettre, et un champ obligatoire par parametre mentirait.
-        "ReponseComparatif.voies.agent.mesure.appels_outil[]",
+        "ReponseRecherche.mesure.appels_outil[]",
     }
 )
 
@@ -426,27 +428,14 @@ def capturer() -> dict[str, list[Any]]:
                 # `reserve`, qui vaut `null` partout ailleurs.
                 client.get("/collecte", params={"departement": "13"}).json(),
             ],
-            # `/comparatif` a plus de champs nullables que les autres routes —
-            # `analyse.reserve`, les ecarts quand ils sont vrais, les tableaux
-            # de differences quand rien ne differe. Trois scenarios, choisis
-            # pour qu'AUCUN ne reste toujours vide :
-            #
-            #   nominal    le modele obeit -> ecarts vrais, tableaux vides
-            #   restrictif le modele reduit `limite` -> tableaux NON vides
-            #   panne      le client leve -> `reserve` non nul, analyse absente
-            #
-            # Sans le deuxieme, `seulement_reference` sortirait `unknown[]` ;
-            # sans le troisieme, `reserve` sortirait `null`.
-            "ReponseComparatif": [
-                _comparatif(client, LARGE, LARGE),
-                # Le modele RESTREINT : la voie directe rend plus que lui, donc
-                # `seulement_reference` cesse d'etre vide.
-                _comparatif(client, LARGE, ETROIT),
-                # Le modele ELARGIT : l'inverse, pour `seulement_comparee`. Les
-                # deux tableaux sont symetriques ; n'en exercer qu'un laisserait
-                # l'autre typé `unknown[]`.
-                _comparatif(client, ETROIT, LARGE),
-                _comparatif(client, LARGE, None),
+            # `/recherche` alimente l'ecran principal : « Actualiser » passe
+            # par le modele. Les DEUX etats doivent etre types — analyse
+            # disponible, et analyse absente avec sa reserve. Sans le second,
+            # `reserve` sortirait `null` et le front croirait le champ toujours
+            # vide, c'est-a-dire la degradation impossible a afficher.
+            "ReponseRecherche": [
+                _recherche(client, LARGE, LARGE),
+                _recherche(client, LARGE, None),
             ],
             "ReponseSorties": [
                 client.get("/sorties").json(),
@@ -524,22 +513,17 @@ def _client_du_modele(arguments: dict[str, Any] | None) -> Any:
     return Double()
 
 
-# Ce que l'utilisateur demande, et ce que le modele passe a l'outil. Les faire
-# DIFFERER est ce qui remplit les tableaux d'ecart — avec les memes deux cotes,
-# ils resteraient vides et leur type serait faux.
+# La demande de l'utilisateur, telle que l'ecran l'envoie.
 LARGE = {"departement": "06", "mois": 12, "limite": 25}
-ETROIT = {"departement": "06", "mois": 12, "limite": 1}
 
 
-def _comparatif(
+def _recherche(
     client: Any, corps: dict[str, Any], arguments: dict[str, Any] | None
 ) -> dict[str, Any]:
-    """Une capture. `corps` est la demande de l'utilisateur, `arguments` ce que
-    le modele passe a l'outil ; `None` fait lever le client."""
     from fundora_prospect import api
 
     api.app.dependency_overrides[api.client_anthropic] = lambda: _client_du_modele(arguments)
-    return client.post("/comparatif", json=corps).json()
+    return client.post("/recherche", json=corps).json()
 
 
 def types_captures() -> dict[str, dict[str, Any]]:

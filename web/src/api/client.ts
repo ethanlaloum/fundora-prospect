@@ -29,8 +29,8 @@
  */
 
 import type {
-  ReponseComparatif,
   ReponseEcartes,
+  ReponseRecherche,
   ReponseEvenement,
   ReponseFiltres,
   ReponseLeads,
@@ -193,16 +193,16 @@ export function lireFiltres(): Promise<ReponseFiltres> {
 }
 
 /**
- * Les trois voies sur les memes filtres, et les deux ecarts.
+ * La recherche telle que l'ecran principal la lance : **par le modele**.
  *
- * **Un seul appel.** Demander `/comparatif` puis `/recherche` ferait tourner la
- * voie agent deux fois — deux fois les tokens, deux fois la latence, et deux
- * mesures qui ne peuvent pas coincider. Un comparatif qui fausse sa propre
- * mesure ne mesure rien.
+ * C'est un POST parce que la route declenche du travail — un appel a Claude,
+ * puis une recherche BODACC — au lieu de relire ce que le job a ecrit. Le prix
+ * a payer est la latence ; ce qu'on y gagne est l'analyse par lead.
  *
- * Les filtres partent dans le CORPS et non dans l'URL : la route est un POST,
- * parce qu'elle declenche du travail plutot que de relire.
+ * `outil` porte exactement ce que `/leads` rendait : meme enveloppe, memes
+ * leads, montes par la meme fonction. L'ecran n'a donc rien a apprendre de
+ * nouveau pour les afficher.
  */
-export function lireComparatif(filtres: Filtres): Promise<ReponseComparatif> {
-  return poster<ReponseComparatif>("/comparatif", filtres);
+export function lireRecherche(filtres: Filtres): Promise<ReponseRecherche> {
+  return poster<ReponseRecherche>("/recherche", filtres);
 }

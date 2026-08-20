@@ -25,11 +25,15 @@
  * Phase 7, et `tests/test_front_sans_vocabulaire.py` echouerait si l'un d'eux
  * etait recopie ici.
  *
- * Chaque motif est aussi un **filtre** : cliquer dessus renvoie sa propre clef
- * a `/ecartes`. Le front propose donc un filtre sur un vocabulaire qu'il ne
- * connait pas — il fait le facteur, pas l'auteur. Sans ce clic, l'auditabilite
- * s'arretait au comptage : on lisait qu'un motif avait refuse 129 dossiers,
- * on ne pouvait pas dire lesquels.
+ * **Les motifs ne sont plus cliquables**, et c'est une regression assumee.
+ * Le tirage passait par `/ecartes`, qui LIT LA BASE — or l'ecran est alimente
+ * depuis le chemin direct depuis que « Actualiser » passe par le modele. Les
+ * deux populations different : le compte affiche sur la pastille et la liste
+ * tiree derriere auraient parle de deux choses en disant le meme mot.
+ *
+ * Deux chiffres qui se contredisent a l'ecran valent moins que pas de tirage.
+ * Le retablir demande une route `/ecartes` qui interroge la source, pas la
+ * base — un aller-retour de coeur, pas un raccourci de front.
  *
  * La liste vide ne rend rien — et il n'y a pas de cas « aucun refus » a ecrire,
  * parce que le constater demanderait de compter, ce que le front ne fait pas
@@ -37,20 +41,20 @@
  * composant plutot que de le compliquer.
  */
 
-import type { ReponseLeads } from "../api/schema";
+import type { ReponseRecherche } from "../api/schema";
 import { compte, libelle } from "../format";
 
-type Statistiques = ReponseLeads["statistiques"];
+// Les compteurs du CHEMIN DIRECT, pas ceux de la base : ce ne sont pas les
+// memes populations, donc pas les memes clefs. Le composant, lui, n'en nomme
+// aucune — il rend ce qu'il recoit. Typer la source reelle plutot qu'une forme
+// permissive fait dire au type d'ou viennent ces chiffres.
+type Statistiques = ReponseRecherche["outil"]["statistiques"];
 
 interface Props {
   statistiques: Statistiques;
-  /** Le motif dont les cas sont ouverts, ou rien. */
-  motifOuvert: string | null;
-  /** Rend la clef cliquee — celle du coeur, jamais une reformulation. */
-  onMotif: (motif: string) => void;
 }
 
-export function Compteurs({ statistiques, motifOuvert, onMotif }: Props) {
+export function Compteurs({ statistiques }: Props) {
   const entrees = Object.entries(statistiques);
 
   return (
@@ -76,16 +80,9 @@ export function Compteurs({ statistiques, motifOuvert, onMotif }: Props) {
 
       <ul className="refus">
         {Object.entries(statistiques.ecartes).map(([motif, combien]) => (
-          <li key={motif}>
-            <button
-              aria-pressed={motif === motifOuvert}
-              className={motif === motifOuvert ? "refus-motif ouvert" : "refus-motif"}
-              onClick={() => onMotif(motif)}
-              type="button"
-            >
-              <span className="refus-compte">{compte(combien)}</span>
-              <span className="refus-libelle">{motif}</span>
-            </button>
+          <li className="refus-motif" key={motif}>
+            <span className="refus-compte">{compte(combien)}</span>
+            <span className="refus-libelle">{motif}</span>
           </li>
         ))}
       </ul>
