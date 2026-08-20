@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from tools.exporter_types import (
+    CHEMINS_DICTIONNAIRES,
     CIBLE,
     champs_degeneres,
     fusionner,
@@ -145,3 +146,30 @@ def test_le_controle_rend_le_CHEMIN_du_champ_fautif(tmp_path: Path) -> None:
     chercher a la main dans une reponse de plusieurs centaines de lignes."""
     problemes = champs_degeneres(inferer({"a": {"b": {"c": None}}}), "Reponse")
     assert problemes == ["Reponse.a.b.c : jamais renseigne (type deduit `null`)"]
+
+
+def test_un_dictionnaire_TOUJOURS_VIDE_est_degenere() -> None:
+    """**La troisieme forme de degenerescence.**
+
+    Un chemin declare comme dictionnaire etait exempte du controle avant
+    d'etre regarde. Un dictionnaire toujours vide sortait donc
+    `Record<string, unknown>` — un type faux, sur le seul chemin qu'on avait
+    choisi de ne pas verifier.
+
+    Le cas reel : `analyse.par_lead`, quand le double citait un identifiant que
+    l'outil ne rendait pas.
+    """
+    chemin = sorted(CHEMINS_DICTIONNAIRES)[0]
+    vide: dict[str, object] = {"genre": "objet", "champs": {}}
+    assert champs_degeneres(vide, chemin) == [
+        f"{chemin} : dictionnaire toujours vide, valeur inconnue"
+    ]
+
+
+def test_un_dictionnaire_RENSEIGNE_n_est_pas_degenere() -> None:
+    """L'autre moitie : un controle qui refuserait tout dictionnaire
+    obligerait a retirer les chemins de la liste, donc a ecrire les clefs de
+    donnees dans le fichier genere — ce que la liste existe pour eviter."""
+    chemin = sorted(CHEMINS_DICTIONNAIRES)[0]
+    plein = {"genre": "objet", "champs": {"A-1": inferer("une analyse")}}
+    assert champs_degeneres(plein, chemin) == []

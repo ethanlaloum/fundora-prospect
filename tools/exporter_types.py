@@ -45,6 +45,7 @@ Usage : `python tools/exporter_types.py [chemin]`
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -61,6 +62,14 @@ CHEMINS_DICTIONNAIRES = frozenset(
     {
         "ReponseLeads.statistiques.ecartes",
         "ReponseEvenement.revisions[].contenu",
+        # `par_lead` est `{id: analyse}` : les clefs sont des identifiants
+        # d'annonce, pas des champs. En deduire un champ par identifiant
+        # ecrirait le corpus dans le fichier genere, et le front croirait a un
+        # schema fixe.
+        "ReponseComparatif.analyse.par_lead",
+        # Idem : les clefs sont les noms des parametres que le MODELE a passes.
+        # Il peut en omettre, et un champ obligatoire par parametre mentirait.
+        "ReponseComparatif.voies.agent.mesure.appels_outil[]",
     }
 )
 
@@ -191,6 +200,18 @@ def champs_degeneres(type_: dict[str, Any], chemin: str = "") -> list[str]:
             return [f"{chemin} : tableau toujours vide, element inconnu"]
         return champs_degeneres(type_["element"], f"{chemin}[]")
     if chemin in CHEMINS_DICTIONNAIRES:
+        # **Troisieme forme de degenerescence, trouvee en Phase 8.** Les deux
+        # premieres — champ toujours nul, tableau toujours vide — etaient
+        # gardees ; un DICTIONNAIRE toujours vide ne l'etait pas, parce que ce
+        # branchement rendait `[]` avant de regarder quoi que ce soit.
+        #
+        # Le cas reel : `analyse.par_lead` sortait `Record<string, unknown>`
+        # parce que le double citait un identifiant que l'outil ne rendait pas.
+        # Le type etait faux, le controle muet, et rien ne le signalait — la
+        # meme cecite que les deux autres formes, sur le seul chemin qu'on avait
+        # exempte.
+        if not type_["champs"]:
+            return [f"{chemin} : dictionnaire toujours vide, valeur inconnue"]
         return []
     return [
         probleme
@@ -287,7 +308,7 @@ def capturer() -> dict[str, list[Any]]:
     """
     from fastapi.testclient import TestClient
 
-    from fundora_prospect import api, collecte, entrepot
+    from fundora_prospect import api, collecte, entrepot, pipeline
     from fundora_prospect.bodacc import Annonce, Cedant, ResultatRecherche
     from fundora_prospect.enrichment import Enrichissement
     from fundora_prospect.models import StatutEntreprise
@@ -351,6 +372,23 @@ def capturer() -> dict[str, list[Any]]:
             )
         base.close()
 
+        # La troisieme voie, sans reseau : le client du modele est injecte par
+        # la dependance, comme dans les tests. `executer` reste le VRAI
+        # pipeline — c'est ce qui fait que les leads du comparatif ont la meme
+        # forme que ceux de `/leads`, et non celle d'un double.
+        from fundora_prospect import agent as module_agent
+
+        # La voie directe voit un corpus VOLONTAIREMENT plus petit que la base :
+        # `SANS-ACTE` manque. Sans ca, `fraicheur_de_la_base.seulement_comparee`
+        # — les ids que la base a et que la source n'a plus — resterait toujours
+        # vide, et le type sortirait `unknown[]`.
+        _en_direct = [a for a in corpus(470_000.0) if a.id != "SANS-ACTE"]
+        module_agent.rechercher = lambda **_: ResultatRecherche(
+            annonces=_en_direct, publiees=len(_en_direct), rapatriees=len(_en_direct)
+        )
+        module_agent.enrichir = lambda s, **_: enrichir(s, False)
+        api.app.dependency_overrides[api.executeur] = lambda: pipeline.executer
+
         client = TestClient(api.app)
         commun = {"departement": "06", "mois": 12}
         hier = (date.today() - timedelta(days=1)).isoformat()
@@ -388,6 +426,28 @@ def capturer() -> dict[str, list[Any]]:
                 # `reserve`, qui vaut `null` partout ailleurs.
                 client.get("/collecte", params={"departement": "13"}).json(),
             ],
+            # `/comparatif` a plus de champs nullables que les autres routes —
+            # `analyse.reserve`, les ecarts quand ils sont vrais, les tableaux
+            # de differences quand rien ne differe. Trois scenarios, choisis
+            # pour qu'AUCUN ne reste toujours vide :
+            #
+            #   nominal    le modele obeit -> ecarts vrais, tableaux vides
+            #   restrictif le modele reduit `limite` -> tableaux NON vides
+            #   panne      le client leve -> `reserve` non nul, analyse absente
+            #
+            # Sans le deuxieme, `seulement_reference` sortirait `unknown[]` ;
+            # sans le troisieme, `reserve` sortirait `null`.
+            "ReponseComparatif": [
+                _comparatif(client, LARGE, LARGE),
+                # Le modele RESTREINT : la voie directe rend plus que lui, donc
+                # `seulement_reference` cesse d'etre vide.
+                _comparatif(client, LARGE, ETROIT),
+                # Le modele ELARGIT : l'inverse, pour `seulement_comparee`. Les
+                # deux tableaux sont symetriques ; n'en exercer qu'un laisserait
+                # l'autre typé `unknown[]`.
+                _comparatif(client, ETROIT, LARGE),
+                _comparatif(client, LARGE, None),
+            ],
             "ReponseSorties": [
                 client.get("/sorties").json(),
                 client.get("/sorties", params={"depuis": hier}).json(),
@@ -399,6 +459,87 @@ def capturer() -> dict[str, list[Any]]:
                 ).json(),
             ],
         }
+
+
+def _client_du_modele(arguments: dict[str, Any] | None) -> Any:
+    """Un double du client Anthropic, monte sur les VRAIS types du SDK.
+
+    `arguments` a `None` fait lever : c'est le scenario de panne, celui qui rend
+    `analyse.reserve` non nul. Sans lui, le champ sortirait typé `null`.
+    """
+    from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
+
+    def _charge(messages: list[Any]) -> dict[str, Any]:
+        """L'analyse, attachee aux ids que l'OUTIL a REELLEMENT rendus.
+
+        Le premier jet citait un identifiant en dur. Il n'etait pas dans la
+        sortie, donc `par_lead` sortait toujours vide et son type se reduisait
+        a `Record<string, unknown>` — un dictionnaire degenere, que le controle
+        ne voit pas puisqu'il saute les chemins declares comme dictionnaires.
+        Un vrai modele lit le resultat d'outil ; le double aussi.
+        """
+        ids: list[str] = []
+        for message in messages:
+            contenu = message.get("content")
+            if not isinstance(contenu, list):
+                continue
+            for bloc in contenu:
+                if isinstance(bloc, dict) and bloc.get("type") == "tool_result":
+                    charge_outil = json.loads(bloc["content"])
+                    ids += [lead["id"] for lead in charge_outil.get("leads", [])]
+        return {
+            "synthese": "Cessions recentes, dont plusieurs au-dessus du seuil.",
+            "par_lead": [
+                {"id": identifiant, "analyse": "Cession fraiche, societe active."}
+                for identifiant in ids
+            ],
+        }
+
+    class Double:
+        def __init__(self) -> None:
+            self.messages = self
+
+        def create(self, **_: Any) -> Any:  # noqa: ANN401
+            if arguments is None:
+                raise RuntimeError("api indisponible")
+            if not self.__dict__.setdefault("appele", False):
+                self.appele = True
+                return Message(
+                    id="msg", type="message", role="assistant", model="claude-opus-5",
+                    content=[ToolUseBlock(
+                        id="toolu_1", type="tool_use",
+                        name="search_liquidity_events", input=arguments,
+                    )],
+                    stop_reason="tool_use",
+                    usage=Usage(input_tokens=120, output_tokens=40),
+                )
+            charge = _charge(list(_.get("messages", [])))
+            return Message(
+                id="msg", type="message", role="assistant", model="claude-opus-5",
+                content=[TextBlock(type="text", text=json.dumps(charge, ensure_ascii=False))],
+                stop_reason="end_turn",
+                usage=Usage(input_tokens=200, output_tokens=90),
+            )
+
+    return Double()
+
+
+# Ce que l'utilisateur demande, et ce que le modele passe a l'outil. Les faire
+# DIFFERER est ce qui remplit les tableaux d'ecart — avec les memes deux cotes,
+# ils resteraient vides et leur type serait faux.
+LARGE = {"departement": "06", "mois": 12, "limite": 25}
+ETROIT = {"departement": "06", "mois": 12, "limite": 1}
+
+
+def _comparatif(
+    client: Any, corps: dict[str, Any], arguments: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Une capture. `corps` est la demande de l'utilisateur, `arguments` ce que
+    le modele passe a l'outil ; `None` fait lever le client."""
+    from fundora_prospect import api
+
+    api.app.dependency_overrides[api.client_anthropic] = lambda: _client_du_modele(arguments)
+    return client.post("/comparatif", json=corps).json()
 
 
 def types_captures() -> dict[str, dict[str, Any]]:

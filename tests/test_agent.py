@@ -595,7 +595,14 @@ def test_les_deux_ecarts_ne_portent_PAS_le_meme_nom() -> None:
     premier. Le test verrouille les noms, pas seulement leur presence."""
     charge = comparer(client_nominal(), lire_la_base=lire_la_base_double(["A-PM"]))
 
-    assert set(charge) == {"parametres", "voies", "effet_du_modele", "fraicheur_de_la_base"}
+    assert set(charge) == {
+        "parametres",
+        "leads",
+        "analyse",
+        "voies",
+        "effet_du_modele",
+        "fraicheur_de_la_base",
+    }
     assert set(charge["voies"]) == {"agent", "direct", "base"}
     # Et les deux mesurent bien des choses differentes sur ce corpus.
     assert charge["effet_du_modele"]["identiques"] is True
@@ -651,3 +658,62 @@ def test_le_comparatif_mesure_les_trois_voies() -> None:
     for nom in ("agent", "direct", "base"):
         assert "duree_ms" in charge["voies"][nom]["mesure"], nom
     assert charge["voies"]["agent"]["mesure"]["tokens_entree"] == 300
+
+
+def test_le_comparatif_rend_les_leads_de_la_voie_DIRECTE() -> None:
+    """La reference est le pipeline, pas le modele.
+
+    Le corpus fait restreindre le modele a un lead : la voie agent en rend un,
+    la voie directe deux. Les leads affiches doivent etre les DEUX — sinon
+    l'ecran montrerait l'ensemble filtre en l'appelant « les leads », et le
+    lead que le modele a laisse tomber deviendrait invisible.
+
+    Avec un modele obeissant, les deux cotes rendraient la meme liste et le
+    test ne departagerait rien : c'est le corpus degenere qui a deja coute une
+    mutation survivante sur cette route.
+    """
+    charge = comparer(
+        client_nominal({"departement": "06", "mois": 12, "limite": 1}),
+        executer=executer_sensible,
+    )
+
+    assert [lead["id"] for lead in charge["leads"]] == ["A-PM", "A-PP"]
+    assert charge["voies"]["agent"]["ids"] == ["A-PM"]
+    assert charge["effet_du_modele"]["seulement_reference"] == ["A-PP"]
+
+
+def test_le_comparatif_porte_l_analyse_du_modele() -> None:
+    """Sans elle, l'ecran devrait rappeler `/recherche` — et la voie agent
+    tournerait deux fois, ce qui fausserait la mesure meme du comparatif."""
+    charge = comparer(client_nominal())
+
+    assert charge["analyse"]["disponible"] is True
+    assert set(charge["analyse"]["par_lead"]) == {"A-PM", "A-PP"}
+    assert charge["analyse"]["synthese"] == PROSE_MENSONGERE["synthese"]
+
+
+def test_le_comparatif_degrade_garde_les_leads_et_montre_la_reserve() -> None:
+    """La degradation doit etre lisible depuis le comparatif aussi : on perd le
+    commentaire, pas les leads ni les mesures."""
+    charge = comparer(ClientEnPanne())
+
+    assert charge["analyse"]["disponible"] is False
+    assert "api indisponible" in charge["analyse"]["reserve"]
+    assert [lead["id"] for lead in charge["leads"]] == ["A-PM", "A-PP"]
+    assert charge["voies"]["direct"]["mesure"]["duree_ms"] >= 0
+
+
+def test_les_leads_du_comparatif_sont_ceux_de_la_voie_directe_A_L_IDENTIQUE() -> None:
+    """Pas « la meme forme » : le MEME objet.
+
+    Une copie remontee autrement — reconstruite, filtree, reordonnee — passerait
+    une comparaison de clefs et changerait ce qui est affiche.
+    """
+    client = client_nominal()
+    charge = comparer(client)
+    reference = agent.executer_recherche(
+        {"departement": "06", "mois": 12, "montant_min": 0.0, "limite": 25},
+        aujourdhui=date(2026, 8, 19),
+        executer=executer_double,
+    )
+    assert charge["leads"] == reference["leads"]

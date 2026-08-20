@@ -614,6 +614,23 @@ def comparer(
     # toujours un trou de test, elle peut porter sur du code que rien n'atteint.
     comparaison: dict[str, Any] = {
         "parametres": demande,
+        # Les leads de la voie DIRECTE, une seule fois. Pas ceux de chaque voie :
+        # quand `identiques` est vrai — le cas normal — deux listes cote a cote
+        # feraient comparer a l'oeil, c'est-a-dire faire a la main le calcul
+        # qu'on interdit au front. Les `ids` par voie suffisent a montrer
+        # l'identite ; le detail n'a besoin d'exister qu'une fois.
+        #
+        # Et c'est la voie directe qui fait REFERENCE, pas l'agent. Si le modele
+        # a retire un lead, l'ecran doit montrer celui que le pipeline a produit,
+        # avec un emplacement d'analyse vide en face — le manque se voit.
+        # Afficher les leads de l'agent montrerait l'ensemble filtre en
+        # l'appelant « les leads ».
+        #
+        # Ce sont les MEMES objets que `/leads` et `/recherche.outil` : montes
+        # par `provenance.serialiser`, via `classer`. Quatrieme surface a rendre
+        # des leads, et le test de comparaison inter-surfaces s'y etend.
+        "leads": direct["leads"],
+        "analyse": agent_resultat.analyse.en_dict(),
         "voies": voies,
         "effet_du_modele": effet,
     }

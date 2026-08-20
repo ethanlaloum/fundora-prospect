@@ -926,7 +926,9 @@ def test_comparatif_rend_les_trois_voies_et_DEUX_ecarts(base_peuplee: sqlite3.Co
         .json()
     )
 
-    assert set(charge) == {"parametres", "voies", "effet_du_modele", "fraicheur_de_la_base"}
+    assert set(charge) == {
+        "parametres", "leads", "analyse", "voies", "effet_du_modele", "fraicheur_de_la_base"
+    }
     assert set(charge["voies"]) == {"agent", "direct", "base"}
     # L'ecart qui compte : nul, parce que les deux cotes appellent la meme
     # fonction avec les memes arguments.
@@ -935,3 +937,78 @@ def test_comparatif_rend_les_trois_voies_et_DEUX_ecarts(base_peuplee: sqlite3.Co
     assert charge["fraicheur_de_la_base"]["disponible"] is True
     assert "pas l'effet du modele" in charge["fraicheur_de_la_base"]["reserve"]
     assert charge["fraicheur_de_la_base"]["identiques"] is False
+
+
+# --- Quatre surfaces rendent des leads ------------------------------------------
+#
+# `search_liquidity_events`, `/leads`, `/recherche.outil`, `/comparatif.leads`.
+# Les quatre montent leur enveloppe separement ; les LEADS, eux, viennent tous de
+# `provenance.serialiser`. Ce test verrouille la seconde propriete — et il ne
+# peut le faire que si les quatre tournent sur un VRAI pipeline.
+#
+# Le double de `tests/test_agent.py` fabrique ses leads a la main : comparer ses
+# clefs a celles d'un lead reel validerait une forme que la production n'honore
+# pas. C'est le sixieme visage, et il coute deja assez cher a ce projet. Ici on
+# substitue les deux PORTS — `rechercher` et `enrichir` — et `pipeline.executer`
+# fait le reste.
+
+
+def _agent_sur_un_vrai_pipeline(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    from fundora_prospect import agent as module_agent
+    from tests.test_agent import client_nominal
+
+    monkeypatch.setattr(
+        module_agent,
+        "rechercher",
+        lambda **_: ResultatRecherche(
+            annonces=corpus(), publiees=len(corpus()), rapatriees=len(corpus())
+        ),
+    )
+    monkeypatch.setattr(module_agent, "enrichir", enrichir_stub)
+    api.app.dependency_overrides[api.client_anthropic] = lambda: client_nominal()
+    api.app.dependency_overrides[api.executeur] = lambda: pipeline_reel()
+    return TestClient(api.app)
+
+
+def pipeline_reel() -> Any:
+    from fundora_prospect import pipeline
+
+    return pipeline.executer
+
+
+def test_les_QUATRE_surfaces_rendent_la_meme_forme_de_lead(
+    base_peuplee: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Une clef renommee d'un cote passerait inapercue partout ailleurs.
+
+    Les POPULATIONS different — c'est ecrit et voulu. On compare les clefs et
+    le breakdown, jamais les nombres.
+    """
+    web = TestClient(api.app).get("/leads", params={"departement": "06"}).json()
+    mcp = reponse_mcp(monkeypatch)
+
+    client_agent = _agent_sur_un_vrai_pipeline(monkeypatch)
+    recherche = client_agent.post("/recherche", json={"departement": "06"}).json()
+    comparatif = client_agent.post("/comparatif", json={"departement": "06"}).json()
+
+    listes = {
+        "/leads": web["leads"],
+        "search_liquidity_events": mcp["leads"],
+        "/recherche.outil": recherche["outil"]["leads"],
+        "/comparatif.leads": comparatif["leads"],
+    }
+    for nom, leads in listes.items():
+        assert leads, f"{nom} ne rend aucun lead — la comparaison ne prouverait rien"
+
+    formes = {nom: set(leads[0]) for nom, leads in listes.items()}
+    assert len(set(map(frozenset, formes.values()))) == 1, formes
+
+    breakdowns = {nom: set(leads[0]["breakdown"][0]) for nom, leads in listes.items()}
+    assert len(set(map(frozenset, breakdowns.values()))) == 1, breakdowns
+
+    # Et la provenance, qui est la porte de sortie : si une surface la perdait,
+    # elle emettrait un lead intracable sans qu'aucun test isole ne le voie.
+    for nom, leads in listes.items():
+        assert set(leads[0]["provenance"]) == {
+            "source", "base_legale", "date_collecte", "url_publication",
+        }, nom

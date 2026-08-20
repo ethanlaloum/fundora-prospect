@@ -2705,6 +2705,52 @@ exige de faire avant de conclure. La ligne a été retirée, pas testée.
 Sept mutations sur cette étape, **une survivante au premier passage** (le corpus
 dégénéré) et une survivante qui n'en était pas une (le code mort). Zéro après.
 
+#### Étape 2 bis — `/comparatif` porte les leads et l'analyse
+
+L'écran a besoin des deux ; la route n'en rendait aucun. Deux façons de le
+combler, et elles ne se valent pas : le front pouvait appeler `/comparatif`
+**et** `/recherche` — mais la voie agent tournerait alors **deux fois**, deux
+fois les tokens, deux fois la latence, et deux mesures qui ne peuvent pas
+coïncider. **Un comparatif qui fausse sa propre mesure ne mesure rien.**
+
+`leads` porte donc ceux de la voie **directe**, une seule fois. Pas ceux de
+chaque voie : quand `identiques` est vrai — le cas normal — deux listes côte à
+côte feraient comparer à l'œil, c'est-à-dire faire à la main le calcul qu'on
+interdit au front. Et c'est la voie directe qui fait référence, pas l'agent :
+si le modèle a retiré un lead, l'écran doit montrer celui que le pipeline a
+produit, avec un emplacement d'analyse vide en face. Afficher les leads de
+l'agent montrerait l'ensemble filtré **en l'appelant « les leads »**.
+
+**Quatrième surface à rendre des leads**, et le test de comparaison s'y étend :
+`search_liquidity_events`, `/leads`, `/recherche.outil`, `/comparatif.leads`.
+Il ne pouvait pas être écrit contre le double de `test_agent.py`, qui fabrique
+ses leads à la main — comparer ses clefs à celles d'un lead réel validerait une
+forme que la production n'honore pas. Le test substitue donc les deux **ports**
+et laisse tourner le vrai `pipeline.executer`.
+
+#### La troisième forme de corpus dégénéré, sur le seul chemin qu'on avait exempté
+
+Le contrôle du générateur de types garde deux formes : un champ toujours nul,
+un tableau toujours vide. Il a mordu trois fois sur `/comparatif` — les tableaux
+d'écart, vides tant que les deux voies s'accordent — et le corpus a été enrichi
+pour que le modèle **restreigne** dans un cas et **élargisse** dans l'autre. Les
+deux tableaux sont symétriques ; n'en exercer qu'un laissait l'autre en
+`unknown[]`.
+
+Mais `analyse.par_lead` sortait `Record<string, unknown>` et **le contrôle est
+resté muet** : les chemins déclarés comme dictionnaires étaient exemptés *avant
+d'être regardés*. Un dictionnaire toujours vide est pourtant la même cécité que
+les deux autres formes, sur le seul chemin qu'on avait choisi de ne pas
+vérifier.
+
+La cause était dans le double : il citait un identifiant écrit en dur que
+l'outil ne rendait pas, donc aucune analyse ne se rattachait jamais. Il lit
+maintenant le résultat d'outil qu'on lui passe, comme le ferait un vrai modèle
+— et le contrôle signale désormais un dictionnaire vide, avec ses deux moitiés
+testées.
+
+Quatre mutations sur cette étape, quatre détectées.
+
 ## Si le temps manque
 
 Priorité de coupe, dans cet ordre : Phase 3 enrichissement → Phase 4 serveur
