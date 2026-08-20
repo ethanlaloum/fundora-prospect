@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from fundora_prospect import mcp_server
+from fundora_prospect import pipeline
 
 RACINE = Path(__file__).resolve().parents[1]
 
@@ -166,11 +166,11 @@ def test_l_exemple_de_la_competence_est_le_vrai_format_de_sortie() -> None:
     donc la derive a survecu aux deux corrections — quatrieme occurrence du
     mecanisme « un chiffre survit au changement de sa source ».
 
-    Le test REGENERE l'exemple depuis `_resume` et exige l'egalite. Recopier a
-    la main rouvrirait la meme porte : c'est la source qui doit produire
-    l'exemple, pas la bonne volonte du relecteur.
+    Le test REGENERE l'exemple depuis `pipeline.resumer` et exige l'egalite.
+    Recopier a la main rouvrirait la meme porte : c'est la source qui doit
+    produire l'exemple, pas la bonne volonte du relecteur.
     """
-    attendu = mcp_server._resume(dict(_STATS_DE_REFERENCE))
+    attendu = pipeline.resumer(dict(_STATS_DE_REFERENCE))
     texte = (RACINE / "skills" / "scan-liquidity-events" / "SKILL.md").read_text(encoding="utf-8")
 
     # L'exemple est une citation markdown : on la reconstitue en une ligne.
@@ -183,7 +183,7 @@ def test_l_exemple_de_la_competence_est_le_vrai_format_de_sortie() -> None:
     assert citation == attendu, (
         "l'exemple de SKILL.md a derive du format reel.\n"
         f"  dans SKILL.md : {citation}\n"
-        f"  produit par _resume : {attendu}"
+        f"  produit par pipeline.resumer : {attendu}"
     )
 
 
@@ -351,23 +351,122 @@ def test_la_version_est_identique_dans_les_quatre_sources() -> None:
 # --- Lancement du serveur MCP hors du depot -----------------------------------
 
 
-def _copier_plugin_sans_venv(destination: Path) -> Path:
+# Ce qu'une installation ne porte pas : environnements, caches, artefacts
+# d'outillage. Aucun n'est versionne.
+ARTEFACTS = (
+    ".venv",
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    "node_modules",
+    "dist",
+    ".vite",
+)
+
+# La copie du depot versionne tient en moins d'une centaine de fichiers. Le
+# plafond est large : il ne mesure pas la croissance du projet, il attrape
+# l'entree d'un ARTEFACT.
+PLAFOND_DE_FICHIERS = 500
+
+
+def _copier_plugin_sans_venv(destination: Path, source: Path | None = None) -> Path:
     """Copie le plugin comme le ferait une installation, MAIS sans `.venv`.
 
     C'est la situation reelle d'un tiers : le depot versionne ne contient
     aucun environnement virtuel.
+
+    ## Le plafond de fichiers n'est pas une precaution decorative
+
+    `web/node_modules` — 66 Mo, des milliers de fichiers — est arrive dans le
+    depot de travail avec le front. Il n'est pas versionne, mais `copytree` ne
+    connait que les motifs qu'on lui donne : cinq copies par ce module, et la
+    suite est passee de quelques secondes a **plus de quinze minutes**, sans
+    qu'une seule ligne de sortie le dise. Le symptome ressemblait a un blocage.
+
+    Ce n'est pas seulement un desagrement. **Une suite lente rend impraticable
+    la mutation**, qui est la methode de verification centrale de ce projet :
+    une passe de dix mutations coute dix executions completes. Le ralentissement
+    n'aurait pas casse un test, il aurait casse la methode.
+
+    D'ou le plafond : le prochain artefact volumineux fera echouer le test avec
+    son nom, au lieu de ralentir la suite en silence. Meme raison que les
+    reserves affichees par le resume — ce qui ne se declare pas se lit comme un
+    resultat.
+
+    `source` est un PARAMETRE pour que le plafond puisse etre pris en defaut sur
+    une arborescence fabriquee. Un garde qu'aucun test ne fait echouer est
+    decoratif : c'est la regle du projet, et elle vaut pour les gardes ajoutes
+    en passant comme pour les autres.
     """
     import shutil
 
-    shutil.copytree(
-        RACINE,
-        destination,
-        ignore=shutil.ignore_patterns(
-            ".venv", ".git", "__pycache__", ".pytest_cache", ".ruff_cache"
-        ),
-    )
+    source = source or RACINE
+    shutil.copytree(source, destination, ignore=shutil.ignore_patterns(*ARTEFACTS))
     assert not (destination / ".venv").exists()
+
+    copies = sorted(p for p in destination.rglob("*") if p.is_file())
+    assert len(copies) < PLAFOND_DE_FICHIERS, (
+        f"la copie du plugin porte {len(copies)} fichiers : un artefact non "
+        f"versionne y est entre. Completer ARTEFACTS. Repertoires les plus "
+        f"fournis : {_plus_fournis(destination)}"
+    )
     return destination
+
+
+def _plus_fournis(base: Path) -> list[str]:
+    """Les repertoires de premier niveau qui portent le plus de fichiers — de
+    quoi nommer le coupable dans le message, plutot que d'annoncer un nombre."""
+    from collections import Counter
+
+    comptes = Counter(
+        p.relative_to(base).parts[0] for p in base.rglob("*") if p.is_file()
+    )
+    return [f"{nom} ({n})" for nom, n in comptes.most_common(3)]
+
+
+# Ecrit EN CLAIR, et surtout pas deduit de `PLAFOND_DE_FICHIERS`.
+#
+# La premiere version fabriquait `PLAFOND_DE_FICHIERS + 1` fichiers. Le test
+# passait alors quel que soit le plafond — porte a 500 000, il fabriquait
+# 500 001 fichiers et depassait encore. **Un test de dents dont le corpus se
+# deduit du parametre garde ne garde pas ce parametre** : c'est le corpus
+# degenere du projet, applique cette fois a une constante.
+#
+# Mesure : la mutation « plafond a 500 000 » a d'abord SURVECU, en 158 secondes
+# — la duree elle-meme etait le symptome, puisque les copies reprenaient
+# `node_modules`.
+FICHIERS_FABRIQUES = 600
+
+
+def test_le_plafond_de_fichiers_attrape_un_artefact_volumineux(tmp_path: Path) -> None:
+    """**Les dents du plafond.** Sans ce test, la garde serait une intention.
+
+    Le cas reel etait `web/node_modules` : 66 Mo de fichiers non versionnes,
+    copies cinq fois, et une suite passee de six secondes a plus de quinze
+    minutes sans qu'une ligne de sortie le dise.
+
+    Relever `PLAFOND_DE_FICHIERS` au-dela de `FICHIERS_FABRIQUES` fait echouer
+    ce test, et c'est voulu : le relever doit etre une decision argumentee, pas
+    le reflexe de quelqu'un que la garde derange.
+    """
+    faux_depot = tmp_path / "depot"
+    (faux_depot / "artefact").mkdir(parents=True)
+    for rang in range(FICHIERS_FABRIQUES):
+        (faux_depot / "artefact" / f"{rang}.bin").write_text("", encoding="utf-8")
+
+    with pytest.raises(AssertionError, match="artefact non versionne"):
+        _copier_plugin_sans_venv(tmp_path / "copie", source=faux_depot)
+
+
+def test_le_plafond_laisse_passer_une_arborescence_normale(tmp_path: Path) -> None:
+    """L'autre moitie : un garde qui refuserait tout serait aussi inutile, et il
+    ferait echouer les quatre tests de lancement pour la mauvaise raison."""
+    faux_depot = tmp_path / "depot"
+    (faux_depot / "src").mkdir(parents=True)
+    (faux_depot / "src" / "module.py").write_text("", encoding="utf-8")
+
+    assert _copier_plugin_sans_venv(tmp_path / "copie", source=faux_depot).is_dir()
 
 
 def _commande_de_mcp_json(racine_copie: Path) -> str:

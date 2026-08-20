@@ -348,9 +348,18 @@ def evaluer(
             poids=grille.departement.poids,
             valeur_normalisee=1.0 if prioritaire_dep else 0.0,
             points=round((1.0 if prioritaire_dep else 0.0) * grille.departement.poids, 4),
+            # Le motif de configuration sort ENTIER. Il portait auparavant
+            # `.splitlines()[0]`, c'est-a-dire la premiere ligne PHYSIQUE du bloc
+            # TOML — un retour a la ligne de mise en page. Le motif s'arretait
+            # donc au milieu d'une phrase (« rien ne justifie de »), ce qui viole
+            # la contrainte 5 : un motif coupe n'explique rien, et c'est
+            # justement le « pourquoi zero » qu'on veut lire.
+            #
+            # Si un affichage a besoin d'une version courte, ce sera un second
+            # champ nomme, jamais un decoupage silencieux d'un texte existant.
             motif=(
                 f"departement {event.departement} ; poids "
-                f"{grille.departement.poids} — {grille.departement.motif.splitlines()[0]}"
+                f"{grille.departement.poids} — {grille.departement.motif}"
             ),
         )
     )
@@ -361,6 +370,10 @@ def evaluer(
         classable=True,
         score=min(100.0, max(0.0, score)),
         contributions=contributions,
+        # Les memes `jours` et la meme `reference` que le motif de la fraicheur
+        # ci-dessus : un seul calcul, deux presentations.
+        jours_ecoules=jours,
+        date_reference=reference,
     )
 
 

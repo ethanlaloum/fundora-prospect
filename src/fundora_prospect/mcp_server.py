@@ -1,7 +1,14 @@
-"""Serveur MCP en stdio — le point d'entree du plugin.
+"""Serveur MCP en stdio — la surface Claude Code du pipeline.
 
 C'est ce serveur que Claude Code appelle quand on ecrit en langage naturel
 « trouve-moi les cessions de plus de 300 k EUR dans le 06 sur 6 mois ».
+
+**Ce module ne fait que de la traduction MCP.** Le pipeline lui-meme vit dans
+`fundora_prospect.pipeline` : il a une seconde surface a alimenter (une API
+web), et un pipeline recopie dans deux transports finit toujours par diverger.
+Restent ici les trois choses qui appartiennent vraiment au protocole : la
+declaration des outils, la normalisation des arguments qu'un modele ecrit, et
+la mise en forme de la reponse.
 
 **Decoupage assume.** La specification listait trois outils granulaires
 (`search`, `enrich`, `score`). Pris a la lettre, il faudrait que le modele
@@ -20,10 +27,11 @@ unites, et le fait que les resultats sortent deja tries.
 L'auditabilite construite depuis la Phase 1 doit etre visible dans le transport
 MCP, sinon elle n'existe que dans les tests.
 
-**Les leads sortent par `provenance.serialiser`, jamais par un dict monte a la
-main.** Ce module a longtemps construit lui-meme la charge utile, et elle ne
-portait qu'un des quatre champs de tracabilite exiges par la contrainte 3. La
-porte unique est ce qui rend la contrainte verifiable ici.
+**`rechercher` et `enrichir` sont importes ici pour etre PASSES au pipeline.**
+Ce module est la racine de composition de la surface MCP : c'est lui qui
+choisit les deux ports par lesquels le pipeline sort de la machine. C'est aussi
+ce qui permet a `tests/test_mcp_server.py` de les substituer sans toucher au
+transport.
 """
 
 from __future__ import annotations
@@ -32,21 +40,18 @@ from datetime import date
 from typing import Any
 
 from mcp.server import MCPServer
-from pydantic import ValidationError
 
-from fundora_prospect import __version__, provenance
-from fundora_prospect.bodacc import DEPARTEMENTS_PACA, Annonce, rechercher
+from fundora_prospect import __version__, pipeline
+from fundora_prospect.bodacc import rechercher
 from fundora_prospect.enrichment import enrichir, siren_valide
-from fundora_prospect.models import LiquidityEvent, StatutEntreprise
-from fundora_prospect.scoring import GrillePonderation, evaluer
-
-MOIS_MAX = 120
-LIMITE_MAX = 100
-LIMITE_DEFAUT = 25
-
-# Plafond d'annonces rapatriees avant filtrage. Au-dela, on paierait des appels
-# API pour des annonces qu'on ecarterait de toute facon.
-PLAFOND_ANNONCES = 600
+from fundora_prospect.models import StatutEntreprise, presenter_evaluation
+from fundora_prospect.pipeline import (
+    LIMITE_DEFAUT,
+    LIMITE_MAX,
+    MOIS_MAX,
+    borne,
+    normaliser_departements,
+)
 
 serveur = MCPServer(
     name="fundora-prospect",
@@ -62,52 +67,11 @@ serveur = MCPServer(
 
 
 # --- Normalisation des parametres --------------------------------------------
-
-
-def normaliser_departements(brut: Any) -> list[str]:
-    """Accepte `"06"`, `"6"`, `6`, `"06,13"` et l'alias `"PACA"`.
-
-    Un modele ecrit indifferemment l'une de ces formes. Le zero initial se perd
-    des qu'un entier passe : `6` doit redevenir `"06"`.
-    """
-    if brut is None:
-        raise ValueError("departement manquant")
-    texte = str(brut).strip()
-    if texte.upper() == "PACA":
-        return list(DEPARTEMENTS_PACA)
-
-    codes: list[str] = []
-    for morceau in texte.split(","):
-        code = morceau.strip().upper()
-        if not code:
-            continue
-        if code.isdigit():
-            code = code.zfill(2)
-        if not (
-            (len(code) == 2 and code.isdigit())
-            or (len(code) == 3 and code.isdigit())
-            or code in {"2A", "2B"}
-        ):
-            raise ValueError(
-                f"departement invalide : {morceau.strip()!r}. Attendu un code "
-                'numerique a deux chiffres, par exemple "06" pour les '
-                'Alpes-Maritimes, "13" pour les Bouches-du-Rhone. Plusieurs '
-                'codes se separent par une virgule ("06,13"), et "PACA" '
-                "designe toute la region."
-            )
-        if code not in codes:
-            codes.append(code)
-    if not codes:
-        raise ValueError('departement vide. Exemple : "06", "06,13" ou "PACA".')
-    return codes
-
-
-def _borne(valeur: int, nom: str, minimum: int, maximum: int) -> int:
-    if not isinstance(valeur, int) or isinstance(valeur, bool):
-        raise ValueError(f"{nom} doit etre un entier, recu {valeur!r}")
-    if not (minimum <= valeur <= maximum):
-        raise ValueError(f"{nom} doit etre compris entre {minimum} et {maximum}, recu {valeur}")
-    return valeur
+#
+# Ce qui reste ici est propre au transport : un modele ecrit `6` la ou le
+# schema JSON attend `"06"`, et un message d'erreur lisible est un message qui
+# lui permet de se corriger seul. Le vocabulaire du domaine — codes de
+# departement, alias « PACA » — est descendu dans le pipeline.
 
 
 def _date(brut: str | None, nom: str) -> date | None:
@@ -121,84 +85,43 @@ def _date(brut: str | None, nom: str) -> date | None:
         ) from exc
 
 
-# --- Mise en forme -------------------------------------------------------------
-
-
-def _resume(stats: dict[str, Any]) -> str:
-    """Le resume est lu par un modele, puis recopie tel quel a l'utilisateur.
-    Il doit donc separer ce qui a ete ECARTE — un jugement, avec son motif — de
-    ce qui a seulement ete TRONQUE ou jamais examine. Sans cette separation, la
-    sortie parait exhaustive alors qu'elle est amputee, et le lecteur attribue
-    a la grille des refus qu'elle n'a pas prononces.
-    """
-    morceaux = [f"{stats['annonces_publiees']} annonces publiees"]
-    # Les reserves n'apparaissent que quand elles mordent : une mise en garde
-    # affichee en permanence cesse d'etre lue.
-    if stats["plafond_atteint"]:
-        morceaux.append(
-            f"{stats['annonces_rapatriees']} rapatriees seulement "
-            "(plafond de rapatriement atteint)"
-        )
-    if stats["sans_cedant_ou_illisibles"]:
-        morceaux.append(f"{stats['sans_cedant_ou_illisibles']} sans cedant ou illisibles")
-    morceaux += [
-        f"{stats['annonces_exploitables']} exploitables",
-        # Le chiffre porte sa condition d'obtention DANS la meme phrase : il ne
-        # decrit que les dossiers enrichis, pas la population exploitable.
-        f"{stats['classables_parmi_les_enrichis']} classables "
-        f"parmi les {stats['enrichis']} enrichis",
-    ]
-    morceaux += [f"{n} {motif}" for motif, n in stats["ecartes"].items()]
-    resume = ", ".join(morceaux) + "."
-
-    reserves = []
-    if stats["leads_rendus"] < stats["classables_parmi_les_enrichis"]:
-        reserves.append(
-            f"{stats['leads_rendus']} rendus sur "
-            f"{stats['classables_parmi_les_enrichis']} classables parmi les "
-            f"{stats['enrichis']} enrichis (limite atteinte)"
-        )
-    if stats["candidats_non_enrichis"]:
-        reserves.append(
-            f"{stats['candidats_non_enrichis']} candidats non enrichis donc non "
-            "classes, faute de budget d'appels : relancer avec une limite plus "
-            "haute pour les voir"
-        )
-    if reserves:
-        resume += " " + " ; ".join(reserves) + "."
-    return resume
-
-
 # --- Outils --------------------------------------------------------------------
+#
+# Les descriptions sont des CONSTANTES DE MODULE, pas des litteraux dans le
+# decorateur. Elles sont du prompt, et une seconde surface les consomme :
+# `agent.py` declare le meme outil a l'API Anthropic, qui ne sait rien du MCP.
+# Les recopier la-bas ferait deux prompts qui divergent sur un mot — et le mot
+# qui derive serait, ici, celui qui oriente le modele vers `"06"` plutot que
+# `6`. Un test compare les deux declarations.
 
-
-@serveur.tool(
-    description=(
-        "Recherche les cessions de fonds de commerce publiees au BODACC et rend "
-        "des leads DEJA SCORES et tries, du meilleur au moins bon. Execute tout "
-        "le pipeline : recherche, extraction du prix, identification du cedant, "
-        "verification que la societe cedante est toujours active, et scoring "
-        "explicable.\n\n"
-        "Le prospect rendu est la SOCIETE CEDANTE — celle qui vient d'encaisser "
-        "le produit de la vente.\n\n"
-        "Parametres :\n"
-        '- departement : code a deux chiffres entre guillemets, par exemple "06" '
-        'pour les Alpes-Maritimes ou "13" pour les Bouches-du-Rhone. Ecrire "6" '
-        "fonctionne aussi. Plusieurs departements se separent par une virgule "
-        '("06,13"). L\'alias "PACA" couvre toute la region.\n'
-        "- mois : profondeur de la recherche en mois glissants (defaut 12).\n"
-        "- montant_min : prix de cession minimum en euros (defaut 0).\n"
-        "- limite : nombre maximum de leads rendus (defaut 25, maximum 100).\n\n"
-        "La reponse contient aussi le decompte des annonces ecartees AVEC LEUR "
-        "MOTIF : apport en nature, devise obsolete, societe cedante radiee, acte "
-        "trop ancien. Ces refus font partie du resultat.\n\n"
-        "Chaque lead porte un bloc `provenance` : source, date de collecte, URL "
-        "de l'annonce publiee, et le segment concerne. Les cedants personne "
-        "physique relevent d'un segment distinct de la prospection B2B — le "
-        "bloc le dit, et cette distinction doit etre conservee si les leads "
-        "sont recopies ou resumes."
-    )
+DESCRIPTION_RECHERCHE = (
+    "Recherche les cessions de fonds de commerce publiees au BODACC et rend "
+    "des leads DEJA SCORES et tries, du meilleur au moins bon. Execute tout "
+    "le pipeline : recherche, extraction du prix, identification du cedant, "
+    "verification que la societe cedante est toujours active, et scoring "
+    "explicable.\n\n"
+    "Le prospect rendu est la SOCIETE CEDANTE — celle qui vient d'encaisser "
+    "le produit de la vente.\n\n"
+    "Parametres :\n"
+    '- departement : code a deux chiffres entre guillemets, par exemple "06" '
+    'pour les Alpes-Maritimes ou "13" pour les Bouches-du-Rhone. Ecrire "6" '
+    "fonctionne aussi. Plusieurs departements se separent par une virgule "
+    '("06,13"). L\'alias "PACA" couvre toute la region.\n'
+    "- mois : profondeur de la recherche en mois glissants (defaut 12).\n"
+    "- montant_min : prix de cession minimum en euros (defaut 0).\n"
+    "- limite : nombre maximum de leads rendus (defaut 25, maximum 100).\n\n"
+    "La reponse contient aussi le decompte des annonces ecartees AVEC LEUR "
+    "MOTIF : apport en nature, devise obsolete, societe cedante radiee, acte "
+    "trop ancien. Ces refus font partie du resultat.\n\n"
+    "Chaque lead porte un bloc `provenance` : source, date de collecte, URL "
+    "de l'annonce publiee, et le segment concerne. Les cedants personne "
+    "physique relevent d'un segment distinct de la prospection B2B — le "
+    "bloc le dit, et cette distinction doit etre conservee si les leads "
+    "sont recopies ou resumes."
 )
+
+
+@serveur.tool(description=DESCRIPTION_RECHERCHE)
 def search_liquidity_events(
     # `str | int` et non `str` : le schema JSON refuserait un entier AVANT
     # d'atteindre la normalisation, et un modele ecrit parfois `6` pour le
@@ -210,130 +133,28 @@ def search_liquidity_events(
     limite: int = LIMITE_DEFAUT,
 ) -> dict[str, Any]:
     departements = normaliser_departements(departement)
-    mois = _borne(mois, "mois", 1, MOIS_MAX)
-    limite = _borne(limite, "limite", 1, LIMITE_MAX)
+    mois = borne(mois, "mois", 1, MOIS_MAX)
+    limite = borne(limite, "limite", 1, LIMITE_MAX)
     if montant_min < 0:
         raise ValueError(f"montant_min doit etre positif, recu {montant_min}")
 
-    aujourdhui = date.today()
-    debut = date(
-        aujourdhui.year - (mois // 12) - (1 if aujourdhui.month <= mois % 12 else 0),
-        ((aujourdhui.month - mois - 1) % 12) + 1,
-        1,
-    )
-
-    recherche = rechercher(
+    resultat = pipeline.executer(
         departements=departements,
-        depuis=debut,
-        jusqu_a=aujourdhui,
-        limite=PLAFOND_ANNONCES,
+        mois=mois,
+        montant_min=montant_min,
+        limite=limite,
+        # Les deux ports, choisis par cette surface. Voir l'entete du module.
+        rechercher=rechercher,
+        enrichir=enrichir,
     )
-    annonces = recherche.annonces
 
-    ecartes: dict[str, int] = {}
-
-    def ecarter(motif: str) -> None:
-        ecartes[motif] = ecartes.get(motif, 0) + 1
-
-    # 1. Filtrage sans appel reseau : inutile d'enrichir ce qu'on jettera.
-    candidats: list[Annonce] = []
-    for annonce in annonces:
-        prix = annonce.prix
-        if not prix.retenu:
-            ecarter(str(prix.qualification).replace("_", " "))
-            continue
-        if prix.aberrant:
-            ecarter("montant aberrant")
-            continue
-        if (prix.montant or 0) < montant_min:
-            ecarter("sous le montant minimum")
-            continue
-        candidats.append(annonce)
-
-    # 2. Pre-classement sans enrichissement, pour n'enrichir que le haut du
-    #    panier : l'enrichissement coute un appel API par lead.
-    #
-    #    Le pre-classement utilise le SCORE PROVISOIRE, pas le montant seul.
-    #    Trier sur le montant reintroduirait exactement le biais que la grille
-    #    a corrige : une cession fraiche mais modeste passerait derriere une
-    #    grosse cession ancienne et ne serait jamais enrichie, donc jamais
-    #    rendue. Le score provisoire ignore le statut et le secteur, qui
-    #    demandent l'enrichissement — mais il porte deja la fraicheur.
-    grille = GrillePonderation.defaut()
-
-    def score_provisoire(annonce: Annonce) -> float:
-        provisoire = evaluer(LiquidityEvent.depuis_annonce(annonce), grille, aujourdhui=aujourdhui)
-        return provisoire.score or 0.0
-
-    candidats.sort(key=score_provisoire, reverse=True)
-    a_enrichir = candidats[: min(limite * 2, LIMITE_MAX * 2)]
-
-    leads: list[dict[str, Any]] = []
-    for annonce in a_enrichir:
-        enrichissement = enrichir(annonce.cedant.siren)
-        event = LiquidityEvent.depuis_annonce(annonce, enrichissement)
-        evaluation = evaluer(event, grille, aujourdhui=aujourdhui)
-        if not evaluation.classable:
-            if event.statut_cedant is StatutEntreprise.CESSEE:
-                ecarter("societe cedante cessee")
-            elif event.statut_cedant is StatutEntreprise.NON_DIFFUSIBLE:
-                ecarter("entreprise non diffusible INSEE")
-            else:
-                ecarter("non classable")
-            continue
-
-        # Porte unique de sortie : `assembler` leve si la provenance est
-        # incomplete (contrainte 3). Un lead intracable sort du flux avec son
-        # motif, comme n'importe quel autre refus — il n'est ni rendu sans
-        # provenance, ni perdu en silence.
-        try:
-            lead = provenance.assembler(event, evaluation, date_collecte=aujourdhui)
-        except ValidationError:
-            ecarter("provenance incomplete")
-            continue
-        leads.append(provenance.serialiser(lead))
-
-    leads.sort(key=lambda lead: lead["score"], reverse=True)
-
-    # Ce compteur se prend AVANT la coupe finale — sinon une troncature se lit
-    # comme un jugement de la grille : sur 115 candidats, « 25 classables » se
-    # lit comme 90 refus, alors que la grille n'en a jamais vu que 50 et n'en a
-    # refuse aucun.
-    #
-    # Mais il reste borne par la coupe AMONT `candidats[: limite * 2]`, donc
-    # plafonne a `2 * limite`. Il sature en silence des que la population
-    # depasse ce budget — mesure du 2026-08-17 sur le 06, six mois, > 300 k EUR,
-    # meme population : limite=5 -> 10 classables (plafond touche), limite=25 ->
-    # 49, limite=50 -> 96. C'est pourquoi il s'appelle desormais
-    # `classables_parmi_les_enrichis` : le nom porte sa condition d'obtention.
-    # Sans elle, « classables » promet un jugement sur toute la population alors
-    # qu'il compte ce que la grille a eu le DROIT de regarder.
-    classables_parmi_les_enrichis = len(leads)
-    leads = leads[:limite]
-
-    statistiques = {
-        # Trois populations, trois noms. `annonces_examinees` les confondait :
-        # il valait `annonces_exploitables` sous un nom qui promet le total.
-        # Mesure du 2026-08-16 sur le 06 : 662 / 600 / 458.
-        "annonces_publiees": recherche.publiees,
-        "annonces_rapatriees": recherche.rapatriees,
-        "annonces_exploitables": len(annonces),
-        "sans_cedant_ou_illisibles": recherche.non_exploitables,
-        "plafond_atteint": recherche.plafond_atteint,
-        "candidats_avant_enrichissement": len(candidats),
-        "enrichis": len(a_enrichir),
-        "candidats_non_enrichis": len(candidats) - len(a_enrichir),
-        "classables_parmi_les_enrichis": classables_parmi_les_enrichis,
-        "leads_rendus": len(leads),
-        "ecartes": ecartes,
-    }
     return {
-        "resume": _resume(statistiques),
-        "departements": departements,
-        "periode": {"debut": debut.isoformat(), "fin": aujourdhui.isoformat()},
-        "montant_min_eur": montant_min,
-        "statistiques": statistiques,
-        "leads": leads,
+        "resume": pipeline.resumer(resultat.statistiques),
+        "departements": resultat.departements,
+        "periode": {"debut": resultat.debut.isoformat(), "fin": resultat.fin.isoformat()},
+        "montant_min_eur": resultat.montant_min,
+        "statistiques": resultat.statistiques,
+        "leads": resultat.leads,
     }
 
 
@@ -396,8 +217,6 @@ def score_lead(
     statut_cedant: str = "inconnu",
     code_ape: str | None = None,
 ) -> dict[str, Any]:
-    acte = _date(date_acte, "date_acte")
-    parution = _date(date_parution, "date_parution") or acte or date.today()
     try:
         statut = StatutEntreprise(statut_cedant)
     except ValueError as exc:
@@ -406,29 +225,16 @@ def score_lead(
             f"statut_cedant invalide : {statut_cedant!r}. Attendu l'un de : {attendus}."
         ) from exc
 
-    event = LiquidityEvent(
-        id="score_lead",
-        date_parution=parution,
-        date_acte=acte,
-        departement=normaliser_departements(departement)[0],
-        url_publication="",
-        montant_eur=montant_eur,
-        devise="EUR",
-        qualification="achat",
-        retenu=True,
-        code_ape=code_ape,
-        statut_cedant=statut,
+    return presenter_evaluation(
+        pipeline.evaluer_hypothese(
+            montant_eur=montant_eur,
+            date_acte=_date(date_acte, "date_acte"),
+            date_parution=_date(date_parution, "date_parution"),
+            departement=departement,
+            statut_cedant=statut,
+            code_ape=code_ape,
+        )
     )
-    evaluation = evaluer(event, GrillePonderation.defaut(), aujourdhui=date.today())
-    return {
-        "classable": evaluation.classable,
-        "score": evaluation.score,
-        "motif_refus": evaluation.motif_refus,
-        "breakdown": [
-            {"critere": c.critere, "points": c.points, "poids": c.poids, "motif": c.motif}
-            for c in evaluation.contributions
-        ],
-    }
 
 
 def main() -> None:

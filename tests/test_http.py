@@ -42,9 +42,28 @@ def client(sentinelle: TransportSentinelle) -> httpx.Client:
     return httpx.Client(transport=TransportWhitelist(sentinelle))
 
 
-def test_les_deux_domaines_de_la_spec_sont_autorises() -> None:
-    attendus = frozenset({"bodacc-datadila.opendatasoft.com", "recherche-entreprises.api.gouv.fr"})
-    assert attendus == DOMAINES_AUTORISES
+# Les deux SOURCES DE DONNEES de la contrainte 2. Elles sont ecrites ici en
+# clair, et le test compare l'ensemble complet : un domaine ajoute sans decision
+# fait echouer la suite, ce qui est le seul comportement acceptable pour une
+# liste qui borne ce que le projet a le droit de joindre.
+SOURCES = frozenset({"bodacc-datadila.opendatasoft.com", "recherche-entreprises.api.gouv.fr"})
+
+# Le troisieme domaine n'est pas une source : il ORCHESTRE. La contrainte 1
+# encadre la collecte, et un appel au modele ne rapporte aucune donnee sur un
+# prospect. La distinction est ecrite ici parce que le prochain ajout s'y
+# adossera — et parce qu'un test qui melangerait les deux categories ferait
+# passer une source pour un orchestrateur au premier copier-coller.
+ORCHESTRATEURS = frozenset({"api.anthropic.com"})
+
+
+def test_la_whitelist_est_exactement_les_sources_et_les_orchestrateurs() -> None:
+    assert SOURCES | ORCHESTRATEURS == DOMAINES_AUTORISES
+
+
+def test_les_deux_sources_de_donnees_de_la_spec_sont_toujours_la() -> None:
+    """L'assertion d'origine, conservee : elargir la whitelist ne doit pas
+    pouvoir en retirer une source au passage."""
+    assert SOURCES <= DOMAINES_AUTORISES
 
 
 @pytest.mark.parametrize(

@@ -34,6 +34,11 @@ DOMAINES_AUTORISES = frozenset(
     {
         "bodacc-datadila.opendatasoft.com",
         "recherche-entreprises.api.gouv.fr",
+        # Ni une source de donnees ni une collecte : `api.anthropic.com`
+        # ORCHESTRE le pipeline sur la troisieme voie. Le motif complet est
+        # dans `fundora_prospect.http`, avec ce qui n'a PAS le droit d'y
+        # partir — ni denomination, ni SIREN.
+        "api.anthropic.com",
     }
 )
 

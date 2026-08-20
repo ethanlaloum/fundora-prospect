@@ -43,6 +43,7 @@ from fundora_prospect.models import (
     LiquidityEvent,
     Provenance,
     TypeCedant,
+    presenter_contributions,
 )
 
 SOURCE = (
@@ -127,28 +128,43 @@ def serialiser(lead: Lead) -> dict[str, Any]:
 
     event = lead.event
     return {
+        # L'identifiant de l'annonce, c'est-a-dire la clef de la fiche
+        # `/evenements/{id}`. Un lead n'en portait pas alors qu'un ecarte en
+        # portait un (`models.presenter_ecarte`) : un refus etait donc
+        # consultable en detail, un lead retenu ne l'etait pas. L'asymetrie
+        # etait un oubli, pas une decision — le front l'a revelee en cherchant
+        # quoi mettre dans un lien.
+        #
+        # Ce n'est pas une donnee personnelle : c'est la reference de la
+        # publication au BODACC, celle qui figure deja dans `url_publication`.
+        "id": event.id,
         "score": lead.evaluation.score,
         "cedant": event.cedant_denomination,
         "siren": event.cedant_siren,
         "type_cedant": str(event.cedant_type),
+        # Le libelle vient de l'enum, jamais d'une table recopiee par une
+        # surface : le segment personne physique releve d'une base legale
+        # distincte, et c'est le moment ou cette distinction doit rester lisible.
+        "type_cedant_libelle": event.cedant_type.libelle,
         "montant_eur": event.montant_eur,
         "date_acte": event.date_acte.isoformat() if event.date_acte else None,
         "date_parution": event.date_parution.isoformat(),
+        # Recopies de l'evaluation, jamais recalcules ici : `serialiser` n'a pas
+        # de notion d'aujourd'hui, et s'en donner une ferait un second calcul de
+        # fraicheur a cote du premier.
+        "jours_ecoules": lead.evaluation.jours_ecoules,
+        "date_reference": (
+            lead.evaluation.date_reference.isoformat()
+            if lead.evaluation.date_reference
+            else None
+        ),
         "departement": event.departement,
         "statut_cedant": str(event.statut_cedant),
         "statut_motif": event.motif_enrichissement,
         "code_ape": event.code_ape,
         "section_ape": event.section_ape,
         "url_publication": event.url_publication,
-        "breakdown": [
-            {
-                "critere": c.critere,
-                "points": c.points,
-                "poids": c.poids,
-                "motif": c.motif,
-            }
-            for c in lead.evaluation.contributions
-        ],
+        "breakdown": presenter_contributions(lead.evaluation),
         "provenance": {
             "source": lead.provenance.source,
             "base_legale": lead.provenance.base_legale,

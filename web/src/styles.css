@@ -1,0 +1,779 @@
+/*
+ * Un seul fichier de styles, sans dependance.
+ *
+ * Les classes portent le nom de ce qu'elles habillent, et les modificateurs par
+ * champ (`cellule__score`, `contribution__motif`) sont composes a partir de
+ * CLEFS de l'API — jamais de valeurs. Aucune regle ne depend d'un motif de refus
+ * ni d'un libelle de segment : `tests/test_front_sans_vocabulaire.py` balaye
+ * aussi les feuilles de style, precisement parce qu'un libelle se cache tres
+ * bien dans un `content:`.
+ *
+ * Le double tiret bas du modificateur n'est pas decoratif. Ecrit
+ * `.cellule-montant_eur`, le selecteur presente un tiret suivi du nom d'un champ
+ * numerique — soit, pour un balayage textuel, une soustraction. Le verrou
+ * `tests/test_front_ne_recalcule_rien.py` le signalait, et il avait raison de le
+ * faire : distinguer les deux demanderait de savoir lire le CSS et le JS, pas de
+ * chercher un motif. Adopter une convention de nommage coute une seconde ;
+ * assouplir le verrou couterait la garantie.
+ */
+
+:root {
+  --encre: #1a1a1a;
+  --encre-douce: #5c5c5c;
+  --fond: #fbfbf9;
+  --fond-carte: #ffffff;
+  --trait: #e0ddd6;
+  --accent: #1f5c4d;
+  --alerte: #8a3324;
+  /* Le segment `pp` : signale, jamais disqualifie. D'ou un ton distinct de
+   * celui des erreurs — ce n'est pas un defaut, c'est une base legale
+   * differente. */
+  --attention: #9a6b1f;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--fond);
+  color: var(--encre);
+  font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.page {
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 5rem;
+}
+
+/* --- Entete ---------------------------------------------------------------- */
+
+.entete {
+  margin-bottom: 1.5rem;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.sous-titre {
+  margin: 0;
+  max-width: 44rem;
+  color: var(--encre-douce);
+}
+
+/* --- Filtres --------------------------------------------------------------- */
+
+.filtres {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--trait);
+  border-radius: 0.5rem;
+  background: var(--fond-carte);
+}
+
+.filtre {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1 1 11rem;
+}
+
+.filtre-clef {
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--encre-douce);
+}
+
+.filtre-saisie {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--trait);
+  border-radius: 0.35rem;
+  background: var(--fond);
+  color: inherit;
+  font: inherit;
+}
+
+/* L'unite du champ, servie par `/filtres`. Sans elle, « mois » a ete rempli
+ * avec un nom de mois et « limite » lue comme des millions d'euros. */
+.filtre-aide {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--encre-douce);
+}
+
+.filtre-saisie:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.valider {
+  padding: 0.5rem 1.1rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.35rem;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.valider[disabled] {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* --- Ce que l'API a decide -------------------------------------------------- */
+
+.resume {
+  margin: 1.5rem 0 0.75rem;
+  padding: 0.9rem 1rem;
+  border-left: 3px solid var(--accent);
+  background: var(--fond-carte);
+  font-size: 0.95rem;
+}
+
+.erreur {
+  margin: 1rem 0 0;
+  padding: 0.9rem 1rem;
+  border-left: 3px solid var(--alerte);
+  background: var(--fond-carte);
+  color: var(--alerte);
+}
+
+.requete {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 2rem;
+  margin: 0 0 1.5rem;
+}
+
+.champ {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.champ dt {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--encre-douce);
+}
+
+.champ dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* --- Compteurs de population ------------------------------------------------ */
+
+.compteurs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.compteur {
+  display: flex;
+  flex-direction: column;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--trait);
+  border-radius: 0.4rem;
+  background: var(--fond-carte);
+}
+
+.compteur-valeur {
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.compteur-clef {
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--encre-douce);
+}
+
+/* Une reserve n'est rendue que lorsqu'elle mord — voir `Compteurs.tsx`. */
+.reserve {
+  margin: 0.6rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px dashed var(--alerte);
+  border-radius: 0.4rem;
+  color: var(--alerte);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.refus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.75rem 0 1.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+/* Chaque motif est un filtre : le libelle vient de l'API, le clic le lui
+ * renvoie. Le front ne connait aucun de ces mots. */
+.refus-motif {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--trait);
+  border-radius: 999px;
+  background: var(--fond-carte);
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.refus-motif:hover {
+  border-color: var(--encre-douce);
+}
+
+.refus-motif.ouvert {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.refus-motif.ouvert .refus-libelle {
+  color: #fff;
+}
+
+.refus-compte {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.refus-libelle {
+  color: var(--encre-douce);
+}
+
+/* --- La fiche d'un evenement -------------------------------------------------- */
+
+.fiche {
+  display: block;
+  margin: 1.5rem 0;
+  padding: 1rem 1.1rem 1.2rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.5rem;
+  background: var(--fond-carte);
+}
+
+.fiche-entete {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--trait);
+}
+
+.fiche-entete h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--encre-douce);
+}
+
+.fermer {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--trait);
+  border-radius: 0.3rem;
+  background: none;
+  color: var(--encre-douce);
+  font: inherit;
+  cursor: pointer;
+}
+
+.fiche .lead-detail,
+.fiche-refus {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.fiche-section {
+  margin-top: 1.1rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--trait);
+}
+
+.fiche-section h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--encre-douce);
+}
+
+/* A qui le journal se rapporte. Rendue meme — surtout — quand la section est
+ * vide : c'est la qu'elle distingue « cette societe n'a pas bouge » de
+ * « aucune societe n'est identifiee ». */
+.attribution {
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+  color: var(--encre-douce);
+}
+
+.revisions,
+.transitions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.revision,
+.transition {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--trait);
+  border-radius: 0.4rem;
+  background: var(--fond);
+}
+
+.revision-date {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--encre-douce);
+}
+
+.vers-la-fiche {
+  margin: 0.6rem 0 0;
+}
+
+.lien {
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--trait);
+  border-radius: 0.3rem;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.lien:hover {
+  border-color: var(--accent);
+}
+
+.lead .vers-la-fiche {
+  padding: 0 0.9rem 0.9rem;
+  background: var(--fond);
+}
+
+/* --- Les refus, listes ------------------------------------------------------- */
+
+.ecartes {
+  margin: 0 0 1.5rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--trait);
+  border-left: 3px solid var(--encre-douce);
+  border-radius: 0.45rem;
+  background: var(--fond-carte);
+}
+
+.ecartes-compte {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--encre-douce);
+}
+
+.ecartes-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Une fiche de faits, pas une ligne classee : un ecarte n'a ni rang, ni score,
+ * ni provenance — l'API n'en rend aucun, et sa mise en forme ne doit pas
+ * suggerer le contraire. */
+.ecarte {
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--trait);
+  border-radius: 0.4rem;
+  background: var(--fond);
+}
+
+/* --- Les sorties du flux ----------------------------------------------------- */
+
+.sorties {
+  margin: 2.5rem 0 0;
+  padding: 1rem 1.1rem 1.2rem;
+  border: 1px solid var(--trait);
+  border-top: 3px solid var(--attention);
+  border-radius: 0.5rem;
+  background: var(--fond-carte);
+}
+
+.sorties h2 {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.filtre--seul {
+  max-width: 12rem;
+  margin-bottom: 0.75rem;
+}
+
+.sorties-compte {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--encre-douce);
+}
+
+.sorties-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sortie {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--trait);
+  border-left: 3px solid var(--attention);
+  border-radius: 0.4rem;
+  background: var(--fond);
+}
+
+/* --- Le segment du cedant --------------------------------------------------- */
+
+/* Le segment `pp` releve d'une base legale DISTINCTE de celle du segment `pm` :
+ * ce n'est pas de la prospection entre societes, et les deux ne se melangent
+ * pas dans un meme export sans le champ qui les separe. La marque visuelle
+ * porte cette distinction-la, pas une nuance de presentation.
+ *
+ * Le selecteur cite le CODE du segment, jamais son libelle. Le libelle est une
+ * valeur du coeur : il arrive par `type_cedant_libelle` et s'affiche tel quel.
+ * L'ecrire ici en ferait une seconde source, et le verrou de vocabulaire l'a
+ * d'ailleurs signale des la premiere execution — dans ce commentaire meme. */
+.segment__pp {
+  border-left: 3px solid var(--attention);
+}
+
+.lead.segment__pp .cellule__type_cedant_libelle .cellule-valeur {
+  font-weight: 600;
+  color: var(--attention);
+}
+
+/* --- Leads ------------------------------------------------------------------ */
+
+.leads {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.lead {
+  border: 1px solid var(--trait);
+  border-radius: 0.45rem;
+  background: var(--fond-carte);
+  overflow: hidden;
+}
+
+.lead.ouvert {
+  border-color: var(--accent);
+}
+
+.lead-entete {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(9rem, 2fr) minmax(7rem, 1fr) minmax(7rem, 1fr) 5.5rem 4.5rem minmax(6rem, 1fr);
+  gap: 0.5rem 1rem;
+  width: 100%;
+  padding: 0.7rem 0.9rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lead-entete:hover {
+  background: #f4f2ec;
+}
+
+.cellule {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.cellule-clef {
+  font-size: 0.66rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--encre-douce);
+}
+
+.cellule-valeur {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cellule__score .cellule-valeur {
+  font-size: 1.15rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.cellule__montant_eur .cellule-valeur,
+.cellule__jours_ecoules .cellule-valeur {
+  font-variant-numeric: tabular-nums;
+}
+
+.lead-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0.9rem;
+  border-top: 1px solid var(--trait);
+  background: var(--fond);
+}
+
+.champs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.6rem 1.25rem;
+  margin: 0;
+}
+
+.champs a {
+  color: var(--accent);
+}
+
+/* --- Detail du calcul (contrainte 5) ---------------------------------------- */
+
+.breakdown {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.breakdown th {
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--trait);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+  color: var(--encre-douce);
+}
+
+.breakdown td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--trait);
+  vertical-align: top;
+}
+
+.contribution__points,
+.contribution__poids {
+  width: 4rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Le motif porte le detail du calcul : il sort ENTIER, jamais tronque — et
+ * certains viennent d'un bloc de configuration sur plusieurs lignes. Les
+ * ecraser en un seul paragraphe rendrait illisible la seule chose que la
+ * contrainte 5 demande de montrer, alors qu'un `pre-line` suffit. */
+.contribution__motif {
+  color: var(--encre-douce);
+  white-space: pre-line;
+}
+
+.vide {
+  margin: 1.5rem 0 0;
+  color: var(--encre-douce);
+}
+
+@media (max-width: 60rem) {
+  .lead-entete {
+    grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  }
+}
+
+/* --- Le comparatif ------------------------------------------------------------ */
+
+.lancer {
+  margin: 1.5rem 0 0;
+}
+
+.comparatif {
+  margin: 1rem 0 2rem;
+  padding: 1rem 1.1rem 1.2rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.5rem;
+  background: var(--fond-carte);
+}
+
+.comparatif h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--encre-douce);
+}
+
+/* Le verdict avant les colonnes : l'identite des deux voies est une
+ * AFFIRMATION de l'API, pas quelque chose que le lecteur deduit en alignant
+ * des chiffres. */
+.verdict {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.ecart {
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.4rem;
+}
+
+/* Les deux ecarts ne partagent NI style NI mot. S'ils se ressemblaient, le
+ * second se lirait comme le premier — et quelqu'un conclurait « le modele a
+ * filtre » sur un ecart qui ne dit que l'anciennete d'un balayage. */
+.ecart__effet_du_modele {
+  border: 2px solid var(--accent);
+  background: var(--fond);
+}
+
+.ecart__fraicheur_de_la_base {
+  border: 1px dashed var(--encre-douce);
+  background: none;
+}
+
+.voies {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+
+/* La base en retrait : elle mesure la fraicheur, pas le modele, et sa duree
+ * ecraserait les deux autres a l'oeil sans rien dire du sujet. */
+.voies--retrait {
+  margin-top: 0.5rem;
+  opacity: 0.72;
+}
+
+.voie {
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--trait);
+  border-radius: 0.4rem;
+  background: var(--fond);
+}
+
+.voie__agent {
+  border-left: 3px solid var(--accent);
+}
+
+.appels {
+  margin-top: 1.25rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--trait);
+}
+
+.appels-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.appel {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--trait);
+  border-radius: 0.4rem;
+  background: var(--fond);
+}
+
+.appel-rang {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--encre-douce);
+}
+
+/* --- L'analyse : du commentaire, jamais la source d'un chiffre ---------------- */
+
+.analyse,
+.analyse-encart {
+  border-left: 3px solid var(--attention);
+  background: #fdf8ee;
+}
+
+.analyse {
+  margin-top: 1.25rem;
+  padding: 0.8rem 1rem;
+  border-radius: 0 0.4rem 0.4rem 0;
+}
+
+/* Quand l'analyse manque, la reserve prend sa place. La degradation se voit a
+ * l'ecran, pas seulement dans la reponse — c'est le cas qui arrivera en
+ * demonstration le jour ou la clef expire. */
+.analyse--absente {
+  border-left-color: var(--alerte);
+  background: none;
+}
+
+.analyse--absente .analyse-texte {
+  color: var(--alerte);
+  font-style: italic;
+}
+
+.analyse-texte {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.analyse-encart {
+  margin: 0;
+  padding: 0.55rem 0.9rem;
+  font-size: 0.88rem;
+  font-style: italic;
+  color: var(--encre-douce);
+}

@@ -1,0 +1,208 @@
+/**
+ * La frontiere avec l'API, et le seul endroit du front ou du JSON devient un
+ * type.
+ *
+ * ## Aucun defaut n'est recopie ici — un champ vide n'est pas envoye
+ *
+ * L'API a des defauts (la region, la fenetre en mois, la limite) et des bornes
+ * (`MOIS_MAX`, `LIMITE_MAX`). Les repeter dans le front — en valeur initiale
+ * d'un `<input>`, en attribut `min`/`max`, en texte indicatif — serait ecrire
+ * des VALEURS dans le front : precisement ce que la Phase 7 s'interdit, et
+ * precisement ce qui derive au premier elargissement de fenetre.
+ *
+ * Le front part donc de champs **vides** et n'envoie que ce qui est saisi. La
+ * premiere requete ne porte aucun parametre : c'est le coeur qui decide, et sa
+ * reponse dit ce qu'il a retenu (`departements`, `periode`, `montant_min_eur`),
+ * ce que l'ecran affiche. Un defaut qu'on ne connait pas ne peut pas diverger.
+ *
+ * Meme raisonnement pour les bornes : le front envoie ce qu'on saisit et
+ * **affiche le refus** tel qu'il vient (422 et son `detail`, qui dit deja la
+ * forme attendue).
+ *
+ * ## Le seul `as` du front
+ *
+ * `fetch` rend du non-type par construction : c'est ici, et nulle part ailleurs,
+ * que la forme des reponses est affirmee, en s'appuyant sur `schema.d.ts` —
+ * genere depuis des reponses REELLES et regenere par `tests/test_types_web.py`,
+ * qui echoue si le fichier est perime. Passe cette ligne, `tsc --noEmit` en mode
+ * strict fait le reste : un champ que l'API ne rend pas ne compile pas.
+ */
+
+import type {
+  ReponseEcartes,
+  ReponseRecherche,
+  ReponseEvenement,
+  ReponseFiltres,
+  ReponseLeads,
+  ReponseSorties,
+} from "./schema";
+
+/** Le proxy Vite ; l'API elle-meme n'ecoute que sur la boucle locale. */
+const BASE = "/api";
+
+/**
+ * Les filtres, en texte brut de bout en bout.
+ *
+ * Pas de conversion en nombre : le front n'a rien a calculer, et une valeur
+ * qu'il ne parse pas est une valeur qu'il ne peut pas deformer. La validation
+ * appartient a FastAPI, qui la fait deja.
+ *
+ * Un `type` et non une `interface` : `lire` accepte n'importe quel jeu de
+ * parametres textuels, et une interface ne se laisse pas voir comme un
+ * `Record<string, string>`.
+ */
+export type Filtres = {
+  departement: string;
+  mois: string;
+  montant_min: string;
+  limite: string;
+};
+
+/** Les champs, dans l'ordre d'affichage. Ce sont des noms de parametres de la
+ * route — des clefs, donc, pas des valeurs. */
+export const CHAMPS_FILTRES = ["departement", "mois", "montant_min", "limite"] as const;
+
+export const FILTRES_VIDES: Filtres = {
+  departement: "",
+  mois: "",
+  montant_min: "",
+  limite: "",
+};
+
+/** Ce que l'API renvoie quand elle refuse un argument : son message, tel quel. */
+interface Refus {
+  detail?: unknown;
+}
+
+async function lire<T>(chemin: string, parametres: Record<string, string>): Promise<T> {
+  const requete = new URLSearchParams();
+  for (const [cle, saisie] of Object.entries(parametres)) {
+    // Un champ vide n'est pas un filtre : ne pas l'envoyer laisse le defaut du
+    // coeur s'appliquer, au lieu de le deviner ici.
+    if (saisie !== "") requete.set(cle, saisie);
+  }
+
+  // Une route sans parametre n'a pas de `?` : la fiche d'un evenement n'en
+  // prend aucun, et une interrogation vide dans une URL d'audit se lit comme
+  // un filtre qu'on aurait oublie de remplir.
+  const reponse = await fetch(`${BASE}${chemin}${requete.size ? `?${requete}` : ""}`);
+  const corps: unknown = await reponse.json().catch(() => null);
+
+  if (!reponse.ok) {
+    // Le message vient du serveur — le front n'a pas a formuler un refus qu'il
+    // n'a pas decide. Le repli ne nomme que la route et le code HTTP, deux
+    // choses qu'il connait de son cote de la frontiere.
+    const detail = (corps as Refus | null)?.detail;
+    throw new Error(
+      typeof detail === "string" ? detail : `${chemin} : reponse ${reponse.status}`,
+    );
+  }
+  return corps as T;
+}
+
+async function poster<T>(chemin: string, parametres: Filtres): Promise<T> {
+  // Meme regle qu'en lecture : un champ vide n'est pas un filtre, on ne
+  // l'envoie pas et le defaut du coeur s'applique. Le corps est du JSON parce
+  // que FastAPI valide un modele, la ou les routes de lecture prennent des
+  // parametres d'URL.
+  const corps: Record<string, string> = {};
+  for (const [cle, saisie] of Object.entries(parametres)) {
+    if (saisie !== "") corps[cle] = saisie;
+  }
+
+  const reponse = await fetch(`${BASE}${chemin}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(corps),
+  });
+  const charge: unknown = await reponse.json().catch(() => null);
+
+  if (!reponse.ok) {
+    const detail = (charge as Refus | null)?.detail;
+    throw new Error(
+      typeof detail === "string" ? detail : `${chemin} : reponse ${reponse.status}`,
+    );
+  }
+  return charge as T;
+}
+
+
+export function lireLeads(filtres: Filtres): Promise<ReponseLeads> {
+  return lire<ReponseLeads>("/leads", filtres);
+}
+
+/**
+ * Les evenements REFUSES portant ce motif exact.
+ *
+ * `motif` n'est pas ecrit dans le front : il vient d'une clef d'`ecartes` que
+ * l'API a rendue, et il lui est renvoye tel quel. Le front sert de facteur, pas
+ * d'auteur — c'est ce qui lui permet de proposer un filtre sur un vocabulaire
+ * qu'il ne connait pas.
+ *
+ * Les MEMES filtres que `/leads` sont passes : sans eux, la liste des refus
+ * decrirait une autre population que le decompte sur lequel on vient de
+ * cliquer, et deux nombres cote a cote qui ne parlent pas de la meme chose sont
+ * le defaut signature de ce projet.
+ */
+export function lireEcartes(filtres: Filtres, motif: string): Promise<ReponseEcartes> {
+  return lire<ReponseEcartes>("/ecartes", { ...filtres, motif });
+}
+
+/**
+ * La fiche d'un evenement : son lead OU son refus, ses revisions, et les
+ * transitions de statut de son cedant.
+ *
+ * L'identifiant part dans le CHEMIN, donc encode : un `/` ou une espace non
+ * echappes changeraient la route interrogee, et la reponse serait un 404
+ * plausible plutot qu'une erreur qui se voit.
+ *
+ * Aucun filtre n'accompagne la demande — une fiche est un cas precis, pas une
+ * population — d'ou une URL sans interrogation.
+ */
+export function lireEvenement(identifiant: string): Promise<ReponseEvenement> {
+  return lire<ReponseEvenement>(`/evenements/${encodeURIComponent(identifiant)}`, {});
+}
+
+/**
+ * Les cedants qui ont cesse, dates.
+ *
+ * `depuis` vide n'est pas envoye : la route rend alors tout le journal, ce qui
+ * est son defaut a elle. Le front ne choisit pas de fenetre — il n'en connait
+ * aucune.
+ *
+ * Cette route ne prend PAS les filtres de l'ecran : une sortie du flux est un
+ * fait daté sur un cedant, pas une population de recherche. Lui passer le
+ * departement ou le montant laisserait croire qu'elle en depend.
+ */
+export function lireSorties(depuis: string): Promise<ReponseSorties> {
+  return lire<ReponseSorties>("/sorties", { depuis });
+}
+
+/**
+ * Ce que chaque filtre attend : son unite, ses bornes, son defaut.
+ *
+ * Le front affiche des clefs prettifiees, et une clef ne dit pas son unite —
+ * « mois » a ete rempli avec « Avril », « limite » lue comme des millions
+ * d'euros. Ces phrases viennent donc de l'API : les ecrire ici en ferait des
+ * valeurs recopiees, qui derivent au premier changement de borne.
+ *
+ * Un seul appel, au chargement : la reponse ne depend d'aucune saisie.
+ */
+export function lireFiltres(): Promise<ReponseFiltres> {
+  return lire<ReponseFiltres>("/filtres", {});
+}
+
+/**
+ * La recherche telle que l'ecran principal la lance : **par le modele**.
+ *
+ * C'est un POST parce que la route declenche du travail — un appel a Claude,
+ * puis une recherche BODACC — au lieu de relire ce que le job a ecrit. Le prix
+ * a payer est la latence ; ce qu'on y gagne est l'analyse par lead.
+ *
+ * `outil` porte exactement ce que `/leads` rendait : meme enveloppe, memes
+ * leads, montes par la meme fonction. L'ecran n'a donc rien a apprendre de
+ * nouveau pour les afficher.
+ */
+export function lireRecherche(filtres: Filtres): Promise<ReponseRecherche> {
+  return poster<ReponseRecherche>("/recherche", filtres);
+}

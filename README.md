@@ -25,6 +25,7 @@ La démo tourne **sur le réseau réel**, sans jeu de données figé : environ 1
 dépendances, `demo.sh` s'arrête en disant quoi lancer plutôt que d'échouer en
 cours de route.
 
+
 ---
 
 ## Le raisonnement : du BODACC au prospect
@@ -353,6 +354,60 @@ Le découpage qui compte : **`prix.py` tranche la qualité de la donnée,
 `scoring.py` tranche la pertinence commerciale.** D'où deux seuils distincts —
 24 mois dans le parser, décroissance continue dans la grille. Élargir la
 fenêtre commerciale ne doit jamais obliger à modifier le parser.
+
+### Deux surfaces sur un noyau commun
+
+Le cœur — `pipeline.py` — est appelé par deux surfaces, et par personne d'autre.
+Aucun score ne traverse un LLM : un score qui le ferait cesserait d'être
+reproductible et auditable, ce qui détruirait l'argument central du projet.
+
+```
+                    ┌─ mcp_server.py ────────────► Claude Code  (calcul direct)
+  pipeline.py ──────┤
+    (le coeur)      └─ collecte.py ─► entrepot.py ─► SQLite ──► lecture ──► web
+                       (job)          (SQLite)                  (à venir)
+```
+
+Le chemin direct calcule dans le temps de réponse d'une requête, donc il
+plafonne : 600 annonces rapatriées, `2 × limite` enrichissements. Le job de
+collecte, lui, n'est attendu par personne — il lit toute la fenêtre et enrichit
+tous les cédants qui le méritent. **Les plafonds cessent d'être subis.**
+
+Aucun score n'est stocké. La fraîcheur décroît dès le premier jour : un score
+figé serait faux le lendemain, et la grille est rechargeable sans toucher au
+code. Le score est recalculé à chaque lecture.
+
+### Le coût d'enrichissement, mesuré
+
+L'enrichissement coûte un appel API par société. Deux règles le réduisent sans
+rien perdre — et la différence entre elles compte.
+
+**Déduplication par SIREN, mesurée sur un balayage PACA réel du 2026-08-18,
+12 mois glissants :**
+
+| Département | Annonces exploitables | Citations de SIREN | Sociétés distinctes | Appels évités |
+|---|---|---|---|---|
+| 04 | 182 | 173 | 165 | 8 — 4,6 % |
+| 05 | 175 | 168 | 149 | 19 — 11,3 % |
+| 06 | 941 | 884 | 779 | 105 — 11,9 % |
+| 13 | 1 366 | 1 287 | 1 061 | 226 — 17,6 % |
+| 83 | 871 | 837 | 758 | 79 — 9,4 % |
+| 84 | 405 | 395 | 351 | 44 — 11,1 % |
+| **PACA** | **3 940** | **3 744** | **3 263** | **481 — 12,8 %** |
+
+Sur 4 850 annonces publiées, 3 940 sont exploitables et 3 744 citent un SIREN.
+Un appel par événement en coûterait 3 744 ; un appel par société en coûte
+3 263. **12,8 % d'appels évités sur le premier balayage.**
+
+**Le TTL, lui, agit sur les balayages SUIVANTS.** Un statut n'est resondé
+qu'après 30 jours, et une société cessée ne l'est jamais — elle ne redevient pas
+active. Un second balayage le même jour n'émet donc **aucun** appel
+(`test_un_second_balayage_ne_reenrichit_rien`).
+
+Les deux chiffres ne décrivent pas la même chose et ne s'additionnent pas :
+12,8 % est l'économie *à l'intérieur d'un balayage*, le TTL est l'économie
+*entre deux balayages*. Cette seconde économie dépend de la cadence du job, elle
+n'est donc pas chiffrable indépendamment de celle-ci.
 
 ---
 

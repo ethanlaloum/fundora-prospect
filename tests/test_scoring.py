@@ -194,7 +194,62 @@ def test_departement_a_poids_nul_par_defaut(grille: GrillePonderation) -> None:
     evaluation = evaluer(evenement(), grille, aujourdhui=AUJOURDHUI)
     contribution = next(c for c in evaluation.contributions if c.critere == "departement")
     assert contribution.points == 0.0
-    assert contribution.motif
+    # `assert contribution.motif` tenait ici avant, et c'est par la que la
+    # troncature est passee : le motif etait coupe au milieu d'une phrase et
+    # restait non vide. Presence contre contenu, une fois de plus.
+    assert grille.departement.motif in contribution.motif
+
+
+# --- Le motif de config sort entier ------------------------------------------
+
+# Assez de caracteres pour qu'une coincidence soit exclue, assez peu pour
+# reconnaitre une citation tronquee des sa premiere ligne.
+AMORCE = 40
+
+
+def test_le_motif_de_config_sort_ENTIER(grille: GrillePonderation) -> None:
+    """**Le motif est un texte, il sort entier.**
+
+    Le defaut corrige : `grille.departement.motif.splitlines()[0]` rendait la
+    premiere ligne PHYSIQUE du bloc TOML — un retour a la ligne de mise en page,
+    pas une unite de sens. Le motif s'arretait sur « rien ne justifie de », et
+    la contrainte 5 ne demande pas un motif, elle demande une explication.
+    """
+    evaluation = evaluer(evenement(), grille, aujourdhui=AUJOURDHUI)
+    rendu = next(c.motif for c in evaluation.contributions if c.critere == "departement")
+    source = grille.departement.motif
+
+    assert source in rendu, "le motif de config doit etre cite en entier"
+    assert len(source.splitlines()) > 1, (
+        "corpus degenere : si la source tenait sur une ligne, "
+        "`.splitlines()[0]` passerait ce test"
+    )
+
+
+def test_aucun_motif_de_config_n_est_rendu_PAR_MORCEAUX(grille: GrillePonderation) -> None:
+    """Le garde generique : **citer le debut d'un motif oblige a le citer en
+    entier.**
+
+    Le test precedent garde le cas connu. Celui-ci garde les suivants — un
+    `[:80]`, un `.split('.')[0]`, un nouveau critere qui recopierait le meme
+    reflexe. La regle vaut pour tous les criteres, presents et a venir.
+
+    La derniere assertion empeche le garde de devenir creux : le jour ou plus
+    aucun critere ne citerait sa config, la boucle ne verifierait rien et le
+    test resterait vert.
+    """
+    evaluation = evaluer(evenement(code_ape="56.10A"), grille, aujourdhui=AUJOURDHUI)
+    cites: list[str] = []
+    for contribution in evaluation.contributions:
+        source = getattr(grille, contribution.critere).motif
+        if source[:AMORCE] not in contribution.motif:
+            continue  # ce critere ne cite pas sa config : rien a garder ici
+        cites.append(contribution.critere)
+        assert source in contribution.motif, (
+            f"le motif de {contribution.critere} est cite tronque : "
+            f"il commence comme la config mais ne la contient pas entiere"
+        )
+    assert cites, "aucun critere ne cite sa config — ce garde ne garde rien"
 
 
 # --- Refus de classement -----------------------------------------------------
@@ -248,6 +303,41 @@ def test_chaque_contribution_porte_un_motif(grille: GrillePonderation) -> None:
     assert len(evaluation.contributions) == 4
     for contribution in evaluation.contributions:
         assert contribution.motif.strip(), f"{contribution.critere} sans motif"
+
+
+def test_le_motif_du_montant_cite_le_montant_et_ses_bornes(grille: GrillePonderation) -> None:
+    """Le test precedent ne verifie que la PRESENCE d'un motif. Un motif present
+    et generique — « contribution calculee » — le passe sans rien expliquer :
+    mesure faite, la mutation survit aux 446 tests.
+
+    Or la contrainte 5 ne demande pas qu'un motif existe, elle demande que le
+    detail du CALCUL soit la. Un lecteur doit pouvoir refaire l'operation :
+    il lui faut le montant d'entree, l'echelle, et les deux bornes.
+    """
+    evaluation = evaluer(evenement(montant=250_000.0), grille, aujourdhui=AUJOURDHUI)
+    motif = next(c for c in evaluation.contributions if c.critere == "montant").motif
+
+    assert "250,000" in motif, f"le montant d'entree doit figurer : {motif!r}"
+    assert "log" in motif.lower(), f"l'echelle doit figurer : {motif!r}"
+    assert f"{grille.montant.plancher_eur:,.0f}" in motif
+    assert f"{grille.montant.plafond_eur:,.0f}" in motif
+
+
+def test_le_motif_de_la_fraicheur_cite_le_delai_et_la_forme(grille: GrillePonderation) -> None:
+    """Meme trou, meme cause. `test_le_breakdown_dit_quelle_date_a_servi` garde
+    l'ORIGINE de la date ; personne ne gardait le NOMBRE DE JOURS ni la forme
+    de la decroissance — retirer le delai du motif laissait les 446 tests verts.
+
+    C'est le chiffre le plus decisif du metier : sans lui, le motif dit d'ou
+    part le compte sans jamais dire combien.
+    """
+    acte = date(2026, 6, 1)
+    evaluation = evaluer(evenement(date_acte=acte), grille, aujourdhui=AUJOURDHUI)
+    motif = next(c for c in evaluation.contributions if c.critere == "fraicheur").motif
+
+    assert f"{(AUJOURDHUI - acte).days} jours" in motif, f"le delai doit figurer : {motif!r}"
+    assert grille.fraicheur.forme in motif, f"la forme doit figurer : {motif!r}"
+    assert str(grille.fraicheur.demi_vie_jours) in motif
 
 
 def test_la_grille_est_deterministe(grille: GrillePonderation) -> None:
