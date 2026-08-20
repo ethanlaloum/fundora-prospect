@@ -2,12 +2,22 @@
 
 ## Ce qu'elle n'est pas
 
-Elle n'appelle pas l'API Claude pour executer le pipeline — un score qui
-traverse un LLM cesse d'etre reproductible, ce qui detruit l'argument central
-du projet. Elle n'appelle pas non plus le BODACC : **aucune route ne touche au
-reseau.** Le job de collecte balaye sans contrainte de temps de reponse ; ici on
-relit ce qu'il a ecrit. Une route d'enrichissement rouvrirait un appel API dans
-le temps de reponse, c'est-a-dire exactement ce que la base supprime.
+Aucun score ne traverse un LLM. Un score paraphrase par un modele cesse d'etre
+reproductible, ce qui detruit l'argument central du projet — et c'est vrai des
+SIX routes, `/recherche` comprise : le modele y orchestre et commente, le calcul
+reste dans `pipeline.executer`.
+
+**Cinq routes sur sept ne touchent pas au reseau.** Le job de collecte balaye
+sans contrainte de temps de reponse ; elles relisent ce qu'il a ecrit. Une route
+d'enrichissement rouvrirait un appel API dans le temps de reponse, exactement ce
+que la base supprime.
+
+**Les deux exceptions sont `/recherche` et `/comparatif`**, et elles sont ecrites
+plutot que subies. Ce sont les routes du COMPARATIF, pas de la production : elles
+existent pour mesurer ce qui separe les trois voies, et l'une des trois passe par
+`api.anthropic.com` et le BODACC par construction. Cette phrase disait « aucune
+route » jusqu'a la Phase 8 ; la corriger fait partie du changement, sinon
+l'en-tete devient le premier endroit ou le lecteur est trompe.
 
 ## Pourquoi 127.0.0.1, et pourquoi ce n'est pas du confort
 
@@ -465,6 +475,48 @@ def recherche(corps: Recherche, client: ClientModele, executer: Executeur) -> di
         client=client,
         executer=executer,
     ).en_dict()
+
+
+@app.post("/comparatif")
+def comparatif(
+    corps: Recherche, base: Base, client: ClientModele, executer: Executeur
+) -> dict[str, Any]:
+    """**Le livrable de la Phase 8** : les trois voies sur les memes filtres.
+
+    Deux ecarts, deux causes, et surtout **deux noms** :
+
+    - `effet_du_modele` compare la voie 3 a un APPEL DIRECT au pipeline, memes
+      parametres. Vrai par construction — c'est la preuve que le modele n'a pas
+      touche a l'ensemble des leads. S'il devient faux, `arguments_respectes`
+      dit pourquoi.
+    - `fraicheur_de_la_base` compare la voie 3 a la lecture de la base. Mesure
+      l'age de la derniere collecte, PAS l'effet du modele.
+
+    Si les deux portaient le meme nom, quelqu'un lirait le second comme le
+    premier — et conclurait « le modele a filtre » sur un ecart qui ne dit que
+    l'anciennete d'un balayage.
+
+    La comparaison elle-meme est dans le coeur : le front n'a pas le droit de
+    calculer, et une comparaison de listes en JavaScript vivrait dans le seul
+    fichier que les tests ne couvrent pas.
+    """
+    departements = normaliser_departements(corps.departement)
+    fin = date.today()
+    debut = fenetre(corps.mois, fin)
+    return agent.comparer(
+        departements=departements,
+        mois=corps.mois,
+        montant_min=corps.montant_min,
+        limite=corps.limite,
+        client=client,
+        executer=executer,
+        lire_la_base=lambda: pipeline.lire(
+            entrepot.evenements(base, departements=departements, depuis=debut, jusqu_a=fin),
+            montant_min=corps.montant_min,
+            limite=corps.limite,
+            collecte=entrepot.compteurs_de_collecte(base, departements=departements),
+        ),
+    )
 
 
 class Hypothese(BaseModel):

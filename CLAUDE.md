@@ -2441,11 +2441,24 @@ Un contournement défensif rend le chemin nominal non testé. C'est la même for
 que le faux ami de la substitution de dépendance en Phase 6 : ce qui fait passer
 le test cache ce que le test devait prouver.
 
-**Réparation ponctuelle** — à refaire après chaque `pip install -e` :
+**Le flag ne touche pas que les `.pth` — il touche TOUT `site-packages`.**
+Mesuré en Phase 8, après `pip install anthropic` : les répertoires `anthropic`,
+`jiter`, `distro`, `sniffio` et leurs `dist-info` étaient tous marqués `hidden`.
+
+Ce qui était écrit ci-dessus décrivait donc **un cas particulier** — celui qui
+casse visiblement, parce que `site.addpackage` saute les `.pth` cachés. Les
+autres répertoires cachés ne cassent rien de visible, et c'est précisément
+pourquoi personne ne les avait remarqués. La réparation doit être récursive :
 
 ```sh
-chflags nohidden .venv/lib/python3.13/site-packages/*.pth
+chflags -R nohidden .venv/lib/python*/site-packages
+xattr -dr com.apple.quarantine .venv/lib/python*/site-packages
 ```
+
+La leçon de forme : *un symptôme observé une fois décrit rarement toute
+l'étendue de sa cause.* La première rédaction a nommé le mécanisme
+(`UF_HIDDEN` sous `~/Desktop`) mais borné son périmètre à ce qu'on avait vu
+échouer. C'est le chiffre détaché de son référent, appliqué à un diagnostic.
 
 **Contournement fiable, et celui à donner** : `export PYTHONPATH="$PWD/src"`.
 Il fonctionne quel que soit l'état de l'installation.
@@ -2591,9 +2604,9 @@ exemption dont on ne teste que le côté permissif finit par tout justifier.
 
 #### Deux pièges d'environnement, dont un faux
 
-**Le vrai** : `pip install anthropic` a remis le flag macOS `UF_HIDDEN` sur tout
-`site-packages`, pas seulement sur les `.pth` — le piège documenté plus haut
-n'était qu'un cas particulier. `chflags -R nohidden` sur le répertoire entier.
+**Le vrai** : `pip install anthropic` a remis `UF_HIDDEN` sur **tout**
+`site-packages`, pas seulement sur les `.pth`. Le piège documenté plus haut
+n'était qu'un cas particulier — sa rédaction a été corrigée sur place.
 
 **Le faux, et il a coûté vingt minutes** : le premier `import anthropic` prenait
 **43 secondes pour 0,46 s de CPU**, et une exécution de trois tests 509
@@ -2614,19 +2627,83 @@ plausibilité de l'explication.
 
 Neuf mutations, neuf détectées.
 
-### Étape 2 — `/comparatif` (à venir)
+### Étape 2 ✅ — `/comparatif` : deux écarts, deux causes, deux noms
 
-Ce qui reste à trancher, écrit maintenant pour ne pas le redécouvrir : les deux
-voies **ne lisent pas la même population**. `/leads` relit la base ; `/recherche`
-interroge la source en direct, avec le plafond de rapatriement et le budget
-d'enrichissement que la base a justement supprimés. C'est l'asymétrie déjà
-documentée entre le MCP et l'API, déplacée d'un cran.
+#### Le diagnostic qui accuse la mauvaise cause, anticipé cette fois
 
-Un `ecart.identiques` qui comparerait simplement les deux serait donc faux dès
-le premier appel, et pour une raison qui n'a rien à voir avec le modèle. La
-route devra séparer **deux écarts et deux causes** : la voie 3 contre un appel
-direct au pipeline sur les mêmes paramètres — ce qui isole l'effet du modèle —
-et contre `/leads` — ce qui montre l'effet de la population.
+C'est la **deuxième occurrence** de ce mécanisme, et la première où on l'écrit
+avant qu'il se produise.
+
+La première a coûté du temps en Phase 7 : le générateur de types annonçait
+« `lead.siren` : jamais renseigné », c'est-à-dire un reproche au **corpus**,
+alors que le corpus l'exerçait et que c'est l'agrégation qui perdait
+l'information. Le message était juste sur le symptôme et faux sur la cause.
+
+Ici la cause est connue d'avance. **Les deux voies ne lisent pas la même
+population** : `/leads` relit la base, `/recherche` interroge la source en
+direct, avec le plafond de rapatriement et le budget d'enrichissement que la
+base a justement supprimés. Un `identiques` qui comparerait simplement les deux
+serait faux dès le premier appel — et le lecteur conclurait *« le modèle a
+filtré »*, qui est exactement la conclusion que le comparatif doit permettre
+d'écarter.
+
+**Un écart sans cause attribuée est pire qu'un écart non mesuré**, parce qu'il
+se lit comme une explication. Deux écarts, donc, et surtout deux noms :
+
+| Champ | Ce qu'il compare | Ce qu'il mesure |
+|---|---|---|
+| `effet_du_modele` | voie 3 contre un **appel direct au pipeline**, mêmes paramètres | ce que le modèle a changé — **rien, par construction** |
+| `fraicheur_de_la_base` | voie 3 contre `/leads` | l'âge de la dernière collecte, pas le modèle |
+
+`effet_du_modele.identiques` **doit être vrai par construction** : les deux
+côtés appellent la même fonction avec les mêmes arguments. Un test le
+verrouille, et c'est là toute la valeur du comparatif — il ne mesure pas que la
+latence, il **prouve que le LLM n'a pas touché à l'ensemble des leads**.
+
+Le jour où il devient faux, il ne doit pas rester mystérieux : le modèle a
+appelé l'outil avec d'autres arguments, et `arguments_respectes` le dit. C'est
+« un tri en amont est un filtre », instrumenté. Un test couvre les deux cas —
+arguments respectés et arguments modifiés — parce qu'un corpus où le modèle
+obéit toujours ne départagerait pas les deux.
+
+**Si les deux écarts portaient le même nom, quelqu'un lirait le second comme le
+premier.** C'est la règle 1 des leçons de ce projet — un chiffre ne s'écrit
+jamais sans son référent — appliquée à un identifiant plutôt qu'à une phrase,
+comme l'a été `classables_parmi_les_enrichis`.
+
+#### Le corpus dégénéré, encore, et il a fallu une mutation pour le voir
+
+La mutation qui remplace `ecart(directs, agent)` par `ecart(agent, agent)` —
+comparer la voie 3 **avec elle-même** — a **survécu au premier passage**.
+
+Le test assertait pourtant la bonne propriété : `identiques is True`. Mais le
+double du pipeline ignorait ses paramètres, donc les ids de la voie agent et
+ceux de l'appel direct étaient toujours égaux. Sur ce corpus-là, les deux
+comparaisons rendent le même verdict — **le test ne pouvait distinguer une
+vraie comparaison d'une comparaison avec soi-même.**
+
+C'est exactement la règle déjà écrite : *un test qui ne peut pas distinguer deux
+valeurs n'en garde aucune ; le corpus doit être choisi pour qu'elles diffèrent.*
+La connaître n'a, une fois de plus, pas suffi.
+
+Le remède est un second double — `executer_sensible` — qui **honore `limite`**.
+Le modèle demande alors 1 lead là où l'utilisateur en demandait 25 : la voie
+agent en rend un, la voie directe deux, les deux grandeurs se séparent, et le
+test peut exiger que l'écart soit **vu** (`identiques` faux), **nommé**
+(`seulement_reference == ["A-PP"]`) et **attribué** (`arguments_respectes`
+faux). Un second test ferme l'autre moitié : un argument changé sans effet sur
+l'ensemble laisse `identiques` vrai et `arguments_respectes` faux — sans lui, on
+ne saurait pas si les deux champs mesurent deux choses ou se recopient.
+
+#### Une mutation survivante qui n'était pas un trou de test
+
+`"fraicheur_de_la_base": None` en valeur initiale du dictionnaire : la remplacer
+par n'importe quoi ne changeait rien, parce que **les deux branches l'écrasent**.
+Code inatteignable, pas assertion manquante — la distinction que ce document
+exige de faire avant de conclure. La ligne a été retirée, pas testée.
+
+Sept mutations sur cette étape, **une survivante au premier passage** (le corpus
+dégénéré) et une survivante qui n'en était pas une (le code mort). Zéro après.
 
 ## Si le temps manque
 

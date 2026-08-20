@@ -38,6 +38,7 @@ from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
 
 from fundora_prospect import agent, pipeline
 from fundora_prospect.agent import CHAMPS_TRANSMIS
+from fundora_prospect.pipeline import LIMITE_DEFAUT
 
 # --- Le corpus ------------------------------------------------------------------
 #
@@ -473,3 +474,180 @@ def test_l_outil_declare_a_anthropic_porte_la_description_du_MCP() -> None:
     assert declaration["name"] == "search_liquidity_events"
     assert declaration["description"] == DESCRIPTION_RECHERCHE
     assert declaration["input_schema"]["properties"]["limite"]["maximum"] == pipeline.LIMITE_MAX
+
+
+# --- Le comparatif : deux ecarts, deux causes, deux noms ---------------------------
+
+
+def executer_sensible(**options: Any) -> pipeline.ResultatPipeline:
+    """Un pipeline qui HONORE `limite`, contrairement a `executer_double`.
+
+    **Ce double est ne d'une mutation survivante.** Avec un pipeline qui ignore
+    ses parametres, les ids de la voie agent et ceux de l'appel direct sont
+    toujours egaux — et `ecart(directs, agent)` rend alors la meme chose que
+    `ecart(agent, agent)`. Le test passait dans les deux cas : il assertait la
+    bonne propriete sur un corpus incapable de la mettre en defaut.
+
+    Il faut donc un corpus ou les deux grandeurs se SEPARENT, c'est-a-dire un
+    pipeline qui reagit a `limite`.
+    """
+    resultat = executer_double(**options)
+    limite = int(options.get("limite", LIMITE_DEFAUT))
+    return pipeline.ResultatPipeline(
+        leads=resultat.leads[:limite],
+        statistiques=resultat.statistiques,
+        departements=resultat.departements,
+        debut=resultat.debut,
+        fin=resultat.fin,
+        montant_min=resultat.montant_min,
+    )
+
+
+def lire_la_base_double(ids: list[str]) -> Any:
+    """Une lecture de base qui rend d'autres ids que la voie directe.
+
+    Le corpus les fait DIFFERER volontairement : avec les memes ids des deux
+    cotes, `effet_du_modele` et `fraicheur_de_la_base` vaudraient la meme chose
+    et le test ne departagerait pas les deux — le corpus degenere, applique a
+    une comparaison.
+    """
+
+    def lecture() -> Any:
+        return pipeline.ResultatLecture(
+            leads=[{"id": identifiant} for identifiant in ids],
+            statistiques={"leads_rendus": len(ids)},
+            montant_min=0.0,
+        )
+
+    return lecture
+
+
+def comparer(client: ClientDouble, **options: Any) -> dict[str, Any]:
+    parametres: dict[str, Any] = {
+        "departements": ["06"],
+        "mois": 12,
+        "montant_min": 0.0,
+        "limite": 25,
+        "client": client,
+        "executer": executer_double,
+        "aujourdhui": date(2026, 8, 19),
+    }
+    parametres.update(options)
+    return agent.comparer(**parametres)
+
+
+def test_l_effet_du_modele_est_NUL_par_construction() -> None:
+    """**La preuve que porte le comparatif.** Les deux cotes appellent la meme
+    fonction avec les memes arguments : le modele n'a pas touche a l'ensemble
+    des leads, et ce n'est pas une observation, c'est une propriete."""
+    charge = comparer(client_nominal({"departement": "06", "mois": 12, "limite": 25}))
+
+    effet = charge["effet_du_modele"]
+    assert effet["identiques"] is True
+    assert effet["meme_ordre"] is True
+    assert effet["arguments_respectes"] is True
+    assert effet["seulement_reference"] == [] and effet["seulement_comparee"] == []
+
+
+def test_un_modele_qui_RESTREINT_l_outil_produit_un_ecart_VU_et_attribue() -> None:
+    """« Un tri en amont est un filtre », instrumente — et le test qui manquait.
+
+    Le modele demande `limite=1` la ou l'utilisateur en demandait 25. Sur un
+    pipeline qui honore ses parametres, la voie agent rend alors UN lead et
+    l'appel direct DEUX : les deux grandeurs se separent, et c'est la seule
+    facon de prouver que `effet_du_modele` compare bien les deux voies plutot
+    que l'une avec elle-meme.
+
+    La mutation qui remplacait `ecart(directs, agent)` par `ecart(agent, agent)`
+    survivait sans ce cas.
+
+    Ce qui compte n'est pas que l'ecart existe — c'est qu'il soit ATTRIBUE.
+    Un ecart sans cause se lit comme une explication, et celle qu'on lirait ici
+    serait « le modele a filtre ».
+    """
+    charge = comparer(
+        client_nominal({"departement": "06", "mois": 12, "limite": 1}),
+        executer=executer_sensible,
+    )
+
+    effet = charge["effet_du_modele"]
+    assert effet["identiques"] is False, "l'ecart doit etre VU"
+    assert effet["seulement_reference"] == ["A-PP"], "et il doit dire lequel manque"
+    assert effet["arguments_respectes"] is False, "et il doit dire POURQUOI"
+
+
+def test_un_modele_qui_change_un_argument_sans_effet_le_dit_quand_meme() -> None:
+    """L'autre moitie : le modele change le departement, l'ensemble ne bouge
+    pas. `identiques` reste vrai, `arguments_respectes` non.
+
+    Sans ce cas, on ne saurait pas si les deux champs mesurent deux choses ou
+    se recopient l'un l'autre.
+    """
+    charge = comparer(client_nominal({"departement": "13", "limite": 25}))
+    effet = charge["effet_du_modele"]
+
+    assert effet["identiques"] is True
+    assert effet["arguments_respectes"] is False
+
+
+def test_les_deux_ecarts_ne_portent_PAS_le_meme_nom() -> None:
+    """Si les deux portaient le meme nom, quelqu'un lirait le second comme le
+    premier. Le test verrouille les noms, pas seulement leur presence."""
+    charge = comparer(client_nominal(), lire_la_base=lire_la_base_double(["A-PM"]))
+
+    assert set(charge) == {"parametres", "voies", "effet_du_modele", "fraicheur_de_la_base"}
+    assert set(charge["voies"]) == {"agent", "direct", "base"}
+    # Et les deux mesurent bien des choses differentes sur ce corpus.
+    assert charge["effet_du_modele"]["identiques"] is True
+    assert charge["fraicheur_de_la_base"]["identiques"] is False
+
+
+def test_la_fraicheur_de_la_base_dit_ce_qu_elle_mesure() -> None:
+    """Le nom porte la cause ; la reserve la redit pour le lecteur qui tombe sur
+    la reponse sans avoir lu la documentation."""
+    charge = comparer(client_nominal(), lire_la_base=lire_la_base_double(["A-PM", "A-AUTRE"]))
+    fraicheur = charge["fraicheur_de_la_base"]
+
+    assert fraicheur["seulement_reference"] == ["A-PP"]
+    assert fraicheur["seulement_comparee"] == ["A-AUTRE"]
+    assert "pas l'effet du modele" in fraicheur["reserve"]
+
+
+def test_une_base_non_interrogee_se_DECLARE() -> None:
+    """Une voie manquante qui ne se declare pas se lit comme une voie
+    identique — le mode degrade qui ressemble a un resultat."""
+    charge = comparer(client_nominal())
+
+    assert charge["fraicheur_de_la_base"]["disponible"] is False
+    assert "base" not in charge["voies"]
+    assert charge["effet_du_modele"]["identiques"] is True
+
+
+@pytest.mark.parametrize(
+    ("reference", "comparee", "identiques", "meme_ordre"),
+    [
+        (["a", "b"], ["a", "b"], True, True),
+        # Le cas que `identiques` seul ne verrait pas : meme ensemble, autre
+        # ordre. Un classement reordonne est un classement que le coeur n'a pas
+        # decide, meme si rien n'a disparu.
+        (["a", "b"], ["b", "a"], True, False),
+        (["a", "b"], ["a"], False, False),
+        (["a"], ["a", "b"], False, False),
+    ],
+)
+def test_l_ecart_separe_l_ensemble_et_l_ordre(
+    reference: list[str], comparee: list[str], identiques: bool, meme_ordre: bool
+) -> None:
+    resultat = agent.ecart(reference, comparee)
+    assert resultat["identiques"] is identiques
+    assert resultat["meme_ordre"] is meme_ordre
+
+
+def test_le_comparatif_mesure_les_trois_voies() -> None:
+    """Sans duree par voie, le comparatif ne compare que des ensembles — or la
+    latence est la moitie de ce que le client veut voir."""
+    charge = comparer(client_nominal(), lire_la_base=lire_la_base_double(["A-PM"]))
+
+    for nom in ("agent", "direct", "base"):
+        assert "duree_ms" in charge["voies"][nom]["mesure"], nom
+    assert charge["voies"]["agent"]["mesure"]["tokens_entree"] == 300

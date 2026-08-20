@@ -504,3 +504,142 @@ def analyser(
             ids_rendus=ids,
         ),
     )
+
+
+# --- Le comparatif ------------------------------------------------------------------
+#
+# **Deux ecarts, deux causes, deux noms.** Si les deux portaient le meme nom,
+# quelqu'un lirait le second comme le premier — c'est la regle 1 des lecons de ce
+# projet, appliquee a un identifiant.
+#
+#   effet_du_modele        voie 3 contre un APPEL DIRECT au pipeline, memes
+#                          parametres. Vrai par construction : les deux cotes
+#                          appellent la meme fonction. C'est la preuve que le
+#                          modele n'a pas touche a l'ensemble des leads.
+#
+#   fraicheur_de_la_base   voie 3 contre la lecture de la base. Mesure l'age de
+#                          la derniere collecte, PAS l'effet du modele. Les deux
+#                          populations different par construction — plafond de
+#                          rapatriement et budget d'enrichissement d'un cote,
+#                          tout de l'autre.
+#
+# Un ecart sans cause attribuee est pire qu'un ecart non mesure : il se lit comme
+# une explication.
+
+
+def ecart(reference: Sequence[str], comparee: Sequence[str]) -> dict[str, Any]:
+    """Ce qui separe deux ensembles d'identifiants, avec l'ordre a part.
+
+    Fonction pure, et c'est delibere : le front n'a pas le droit de calculer, et
+    une comparaison de listes en JavaScript vivrait dans le seul fichier que les
+    tests ne couvrent pas.
+
+    `meme_ordre` est distinct d'`identiques` parce que les deux repondent a des
+    questions differentes : le modele a-t-il retire des leads, ou les a-t-il
+    reordonnes ? Un classement reordonne est un classement que le coeur n'a pas
+    decide, meme si l'ensemble est intact.
+    """
+    gauche, droite = list(reference), list(comparee)
+    manquants = [identifiant for identifiant in gauche if identifiant not in set(droite)]
+    ajoutes = [identifiant for identifiant in droite if identifiant not in set(gauche)]
+    return {
+        "identiques": not manquants and not ajoutes,
+        "meme_ordre": gauche == droite,
+        "seulement_reference": manquants,
+        "seulement_comparee": ajoutes,
+    }
+
+
+def comparer(
+    *,
+    departements: Sequence[str],
+    mois: int = 12,
+    montant_min: float = 0.0,
+    limite: int = LIMITE_DEFAUT,
+    aujourdhui: date | None = None,
+    client: Any = None,
+    executer: Callable[..., Any] = pipeline.executer,
+    lire_la_base: Callable[[], Any] | None = None,
+) -> dict[str, Any]:
+    """Les trois voies sur les memes filtres, et ce qui les separe.
+
+    `lire_la_base` est un port comme les autres : la lecture de la base a besoin
+    d'une connexion, que seule la surface sait ouvrir. Absent, la voie « base »
+    est declaree indisponible plutot que silencieusement omise — une voie
+    manquante qui ne se declare pas se lit comme une voie identique.
+    """
+    agent_resultat = analyser(
+        departements=departements,
+        mois=mois,
+        montant_min=montant_min,
+        limite=limite,
+        aujourdhui=aujourdhui,
+        client=client,
+        executer=executer,
+    )
+
+    depart = time.perf_counter()
+    demande = {
+        "departement": ",".join(departements),
+        "mois": mois,
+        "montant_min": montant_min,
+        "limite": limite,
+    }
+    direct = executer_recherche(demande, aujourdhui=aujourdhui, executer=executer)
+    duree_directe = round((time.perf_counter() - depart) * 1000)
+    ids_directs = [lead["id"] for lead in direct["leads"]]
+
+    # Le modele a-t-il appele l'outil avec ce qu'on lui demandait ? C'est la
+    # seule chose qui puisse expliquer un ecart, et sans elle un ecart resterait
+    # mysterieux — donc attribue au hasard, donc au modele.
+    respectes = all(
+        all(appel.get(cle, valeur) == valeur for cle, valeur in demande.items())
+        for appel in agent_resultat.mesure.appels_outil
+    )
+
+    voies: dict[str, Any] = {
+        "agent": {
+            "mesure": agent_resultat.mesure.en_dict(),
+            "ids": agent_resultat.mesure.ids_rendus,
+        },
+        "direct": {"mesure": {"duree_ms": duree_directe}, "ids": ids_directs},
+    }
+
+    effet = ecart(ids_directs, agent_resultat.mesure.ids_rendus)
+    effet["arguments_respectes"] = respectes
+
+    # Pas de valeur initiale pour `fraicheur_de_la_base` : les deux branches
+    # ci-dessous l'ecrivent toutes les deux, donc un repli serait inatteignable.
+    # Une mutation l'a montre en survivant — et une mutation qui survit n'est pas
+    # toujours un trou de test, elle peut porter sur du code que rien n'atteint.
+    comparaison: dict[str, Any] = {
+        "parametres": demande,
+        "voies": voies,
+        "effet_du_modele": effet,
+    }
+
+    if lire_la_base is None:
+        comparaison["fraicheur_de_la_base"] = {
+            "disponible": False,
+            "reserve": "la base n'a pas ete interrogee",
+        }
+        return comparaison
+
+    depart = time.perf_counter()
+    lecture = lire_la_base()
+    duree_base = round((time.perf_counter() - depart) * 1000)
+    ids_base = [lead["id"] for lead in lecture.leads]
+    voies["base"] = {"mesure": {"duree_ms": duree_base}, "ids": ids_base}
+
+    comparaison["fraicheur_de_la_base"] = {
+        "disponible": True,
+        **ecart(ids_directs, ids_base),
+        # Le nom du champ dit deja ce qu'il mesure ; la phrase le redit pour le
+        # lecteur qui tombe sur la reponse sans avoir lu la documentation.
+        "reserve": (
+            "mesure l'age de la derniere collecte, pas l'effet du modele : "
+            "la voie directe interroge la source, la base relit ce qu'un "
+            "balayage anterieur y a ecrit"
+        ),
+    }
+    return comparaison

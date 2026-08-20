@@ -909,3 +909,29 @@ def test_recherche_refuse_un_argument_hors_bornes(base: sqlite3.Connection) -> N
     )
     assert reponse.status_code == 422
     assert "limite" in reponse.json()["detail"]
+
+
+def test_comparatif_rend_les_trois_voies_et_DEUX_ecarts(base_peuplee: sqlite3.Connection) -> None:
+    """La route branche les trois voies sur les memes filtres.
+
+    Le corpus de la base est celui du job de collecte ; celui des deux autres
+    voies est le double du pipeline. Les ids different donc par CONSTRUCTION —
+    et c'est exactement ce que `fraicheur_de_la_base` doit rendre lisible.
+    """
+    from tests.test_agent import client_nominal, executer_double
+
+    charge = (
+        _route_agent(client_nominal(), executer_double)
+        .post("/comparatif", json={"departement": "06", "limite": 25})
+        .json()
+    )
+
+    assert set(charge) == {"parametres", "voies", "effet_du_modele", "fraicheur_de_la_base"}
+    assert set(charge["voies"]) == {"agent", "direct", "base"}
+    # L'ecart qui compte : nul, parce que les deux cotes appellent la meme
+    # fonction avec les memes arguments.
+    assert charge["effet_du_modele"]["identiques"] is True
+    # L'autre mesure autre chose, et le dit.
+    assert charge["fraicheur_de_la_base"]["disponible"] is True
+    assert "pas l'effet du modele" in charge["fraicheur_de_la_base"]["reserve"]
+    assert charge["fraicheur_de_la_base"]["identiques"] is False
