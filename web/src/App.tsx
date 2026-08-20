@@ -35,6 +35,7 @@ import { useEffect, useState } from "react";
 import {
   FILTRES_VIDES,
   lireEcartes,
+  lireComparatif,
   lireEvenement,
   lireFiltres,
   lireLeads,
@@ -42,12 +43,14 @@ import {
   type Filtres as Valeurs,
 } from "./api/client";
 import type {
+  ReponseComparatif,
   ReponseEcartes,
   ReponseEvenement,
   ReponseFiltres,
   ReponseLeads,
   ReponseSorties,
 } from "./api/schema";
+import { Comparatif } from "./composants/Comparatif";
 import { Compteurs } from "./composants/Compteurs";
 import { FicheEvenement } from "./composants/FicheEvenement";
 import { Filtres } from "./composants/Filtres";
@@ -95,6 +98,13 @@ export function App() {
   // remonte a l'ecran — les champs restent utilisables sans elle, et une
   // banniere rouge pour une aide manquante ferait croire a une panne.
   const [aides, setAides] = useState<ReponseFiltres | null>(null);
+
+  // Le comparatif ne part QUE sur demande : il declenche un appel au modele et
+  // une recherche BODACC. Le lancer au chargement ferait payer des tokens a qui
+  // vient seulement lire ses leads.
+  const [comparatif, setComparatif] = useState<ReponseComparatif | null>(null);
+  const [erreurComparatif, setErreurComparatif] = useState<string | null>(null);
+  const [comparaisonEnCours, setComparaison] = useState(false);
 
   const [depuis, setDepuis] = useState("");
   const [sorties, setSorties] = useState<ReponseSorties | null>(null);
@@ -215,6 +225,32 @@ export function App() {
           societe cedante, celle qui encaisse.
         </p>
       </header>
+
+      <p className="lancer">
+        <button
+          className="valider"
+          disabled={comparaisonEnCours}
+          onClick={() => {
+            setComparaison(true);
+            lireComparatif(filtres)
+              .then((recue) => {
+                setComparatif(recue);
+                setErreurComparatif(null);
+              })
+              .catch((souci: unknown) => {
+                setComparatif(null);
+                setErreurComparatif(souci instanceof Error ? souci.message : String(souci));
+              })
+              .finally(() => setComparaison(false));
+          }}
+          type="button"
+        >
+          {comparaisonEnCours ? "…" : "Comparer les trois voies"}
+        </button>
+      </p>
+
+      {erreurComparatif ? <p className="erreur">{erreurComparatif}</p> : null}
+      {comparatif ? <Comparatif reponse={comparatif} /> : null}
 
       <Filtres
         aides={aides}

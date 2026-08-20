@@ -2751,6 +2751,57 @@ testées.
 
 Quatre mutations sur cette étape, quatre détectées.
 
+### Étape 3 ✅ — l'écran du comparatif
+
+Verdict d'abord, colonnes ensuite, analyse à part, leads en bas. Le bouton est
+explicite : le comparatif déclenche un appel au modèle et une recherche BODACC,
+le lancer au chargement ferait payer des tokens à qui vient seulement lire ses
+leads.
+
+#### Trois propriétés sorties du JSX pour être testables
+
+Le front n'a pas de DOM d'essai. Trois propriétés ne devaient donc pas dépendre
+d'une mise en page — elles vivent dans `web/src/comparatif.ts`, pur, exercé par
+`node`.
+
+**1. La cause reste collée à son écart.** `lignesDEcart` rend **toutes** les
+clefs de l'objet, sans en nommer aucune. `arguments_respectes` n'est pas
+affiché parce que quelqu'un s'en est souvenu : il l'est parce qu'il est dans
+l'objet. Un test Python verrouille l'autre moitié — **le front ne NOMME aucune
+clef d'écart**, et la liste des clefs interdites est dérivée du cœur en le
+faisant tourner. Sortir la cause du rendu générique pour la placer ailleurs
+dans la page fait rougir la suite.
+
+C'est « énumérer, c'est décider » : compter est un calcul, choisir les champs à
+montrer en est un aussi, plus discret. Et le champ qu'on perdrait au premier
+remaniement serait justement la cause.
+
+**2. La dégradation est un état rendu, pas une absence.** `presenterAnalyse`
+rend deux formes explicites — le texte, ou la réserve — et **jamais rien**. Les
+deux états sont testés : disponible → synthèse + encarts ; indisponible →
+réserve affichée, `encarts` vide, leads entiers. Un composant qui n'afficherait
+rien laisserait croire qu'il n'y avait rien à dire, et c'est le cas qui arrive
+en démonstration le jour où la clef expire.
+
+**3. Le rattachement se fait par clef.** `encarts[lead.id]`, un accès. Une
+boucle qui chercherait le bon lead pour chaque analyse serait du recalcul.
+
+#### Le manque révélé : le front ne peut pas compter les leads d'une voie
+
+Les colonnes doivent dire combien chaque voie a rendu. `voies.*.mesure` ne
+portait que la durée, et compter en JavaScript est interdit. `leads_rendus` est
+donc rendu par voie — même raison que `sorties_observees`, et le nom vient des
+statistiques du pipeline plutôt que d'être inventé.
+
+**Le double du test a d'abord échoué au bon endroit** : il tronquait la liste
+des leads sans mettre à jour son compteur. Le test mesurait alors le défaut du
+double — un compteur qui décrit une autre population que son nom, exactement ce
+que ce projet traque depuis `annonces_examinees`. Un double doit être cohérent,
+sinon il valide le code contre sa propre erreur.
+
+Trois mutations sur le front, trois détectées : les clefs d'écart énumérées, un
+motif du cœur écrit dans l'analyse, un comptage.
+
 ## Si le temps manque
 
 Priorité de coupe, dans cet ordre : Phase 3 enrichissement → Phase 4 serveur

@@ -19,6 +19,7 @@ import { strict as assert } from "node:assert";
 import {
   FILTRES_VIDES,
   lireEcartes,
+  lireComparatif,
   lireEvenement,
   lireFiltres,
   lireLeads,
@@ -27,9 +28,12 @@ import {
 
 const vues: string[] = [];
 
+const corps: string[] = [];
+
 function repondre(charge: unknown, status = 200): void {
-  globalThis.fetch = (entree: unknown) => {
+  globalThis.fetch = (entree: unknown, options?: { body?: string }) => {
     vues.push(String(entree));
+    corps.push(options?.body ?? "");
     return Promise.resolve(
       new Response(JSON.stringify(charge), {
         status,
@@ -143,3 +147,17 @@ const recue = await lireLeads(FILTRES_VIDES);
 assert.equal(recue.resume, "phrase du coeur");
 
 console.log("client.ts : toutes les assertions passent");
+
+// --- Le comparatif : un POST, et les champs vides restent absents -------------
+//
+// Meme regle qu'en lecture. Envoyer `mois: ""` ferait refuser la requete par
+// FastAPI, ou obligerait le front a connaitre un defaut — ce qu'il s'interdit.
+
+repondre({ leads: [] });
+await lireComparatif({ ...FILTRES_VIDES, departement: "06" });
+assert.equal(vues.at(-1), "/api/comparatif", "les filtres partent dans le corps");
+assert.equal(
+  corps.at(-1),
+  JSON.stringify({ departement: "06" }),
+  "et les champs vides n'y sont pas",
+);

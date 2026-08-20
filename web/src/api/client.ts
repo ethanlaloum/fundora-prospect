@@ -29,6 +29,7 @@
  */
 
 import type {
+  ReponseComparatif,
   ReponseEcartes,
   ReponseEvenement,
   ReponseFiltres,
@@ -99,6 +100,33 @@ async function lire<T>(chemin: string, parametres: Record<string, string>): Prom
   return corps as T;
 }
 
+async function poster<T>(chemin: string, parametres: Filtres): Promise<T> {
+  // Meme regle qu'en lecture : un champ vide n'est pas un filtre, on ne
+  // l'envoie pas et le defaut du coeur s'applique. Le corps est du JSON parce
+  // que FastAPI valide un modele, la ou les routes de lecture prennent des
+  // parametres d'URL.
+  const corps: Record<string, string> = {};
+  for (const [cle, saisie] of Object.entries(parametres)) {
+    if (saisie !== "") corps[cle] = saisie;
+  }
+
+  const reponse = await fetch(`${BASE}${chemin}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(corps),
+  });
+  const charge: unknown = await reponse.json().catch(() => null);
+
+  if (!reponse.ok) {
+    const detail = (charge as Refus | null)?.detail;
+    throw new Error(
+      typeof detail === "string" ? detail : `${chemin} : reponse ${reponse.status}`,
+    );
+  }
+  return charge as T;
+}
+
+
 export function lireLeads(filtres: Filtres): Promise<ReponseLeads> {
   return lire<ReponseLeads>("/leads", filtres);
 }
@@ -162,4 +190,19 @@ export function lireSorties(depuis: string): Promise<ReponseSorties> {
  */
 export function lireFiltres(): Promise<ReponseFiltres> {
   return lire<ReponseFiltres>("/filtres", {});
+}
+
+/**
+ * Les trois voies sur les memes filtres, et les deux ecarts.
+ *
+ * **Un seul appel.** Demander `/comparatif` puis `/recherche` ferait tourner la
+ * voie agent deux fois — deux fois les tokens, deux fois la latence, et deux
+ * mesures qui ne peuvent pas coincider. Un comparatif qui fausse sa propre
+ * mesure ne mesure rien.
+ *
+ * Les filtres partent dans le CORPS et non dans l'URL : la route est un POST,
+ * parce qu'elle declenche du travail plutot que de relire.
+ */
+export function lireComparatif(filtres: Filtres): Promise<ReponseComparatif> {
+  return poster<ReponseComparatif>("/comparatif", filtres);
 }

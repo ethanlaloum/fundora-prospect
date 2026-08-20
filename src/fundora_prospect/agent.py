@@ -597,12 +597,26 @@ def comparer(
         for appel in agent_resultat.mesure.appels_outil
     )
 
+    # `leads_rendus` par voie : le front n'a pas le droit de compter, et sans ce
+    # compteur l'ecran ne pourrait pas dire combien chaque voie a rendu. Meme
+    # raison que `sorties_observees` — une grandeur qui se deduit de la liste est
+    # rendue par l'API, precisement parce qu'elle se deduirait en JavaScript
+    # sinon. Le nom vient des statistiques du pipeline, il n'en invente pas un.
     voies: dict[str, Any] = {
         "agent": {
-            "mesure": agent_resultat.mesure.en_dict(),
+            "mesure": {
+                **agent_resultat.mesure.en_dict(),
+                "leads_rendus": agent_resultat.outil["statistiques"]["leads_rendus"],
+            },
             "ids": agent_resultat.mesure.ids_rendus,
         },
-        "direct": {"mesure": {"duree_ms": duree_directe}, "ids": ids_directs},
+        "direct": {
+            "mesure": {
+                "duree_ms": duree_directe,
+                "leads_rendus": direct["statistiques"]["leads_rendus"],
+            },
+            "ids": ids_directs,
+        },
     }
 
     effet = ecart(ids_directs, agent_resultat.mesure.ids_rendus)
@@ -646,7 +660,13 @@ def comparer(
     lecture = lire_la_base()
     duree_base = round((time.perf_counter() - depart) * 1000)
     ids_base = [lead["id"] for lead in lecture.leads]
-    voies["base"] = {"mesure": {"duree_ms": duree_base}, "ids": ids_base}
+    voies["base"] = {
+        "mesure": {
+            "duree_ms": duree_base,
+            "leads_rendus": lecture.statistiques["leads_rendus"],
+        },
+        "ids": ids_base,
+    }
 
     comparaison["fraicheur_de_la_base"] = {
         "disponible": True,

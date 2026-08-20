@@ -493,9 +493,14 @@ def executer_sensible(**options: Any) -> pipeline.ResultatPipeline:
     """
     resultat = executer_double(**options)
     limite = int(options.get("limite", LIMITE_DEFAUT))
+    leads = resultat.leads[:limite]
     return pipeline.ResultatPipeline(
-        leads=resultat.leads[:limite],
-        statistiques=resultat.statistiques,
+        leads=leads,
+        # Le compteur suit la liste. Un double qui tronquerait l'une sans
+        # l'autre reproduirait le defaut signature de ce projet — un compteur
+        # qui decrit une autre population que son nom — et le test mesurerait
+        # alors le bug du double, pas celui du code.
+        statistiques={**resultat.statistiques, "leads_rendus": len(leads)},
         departements=resultat.departements,
         debut=resultat.debut,
         fin=resultat.fin,
@@ -717,3 +722,22 @@ def test_les_leads_du_comparatif_sont_ceux_de_la_voie_directe_A_L_IDENTIQUE() ->
         executer=executer_double,
     )
     assert charge["leads"] == reference["leads"]
+
+
+def test_chaque_voie_rend_SON_compteur_de_leads() -> None:
+    """Le front n'a pas le droit de compter — une grandeur affichee vient d'un
+    compteur de l'API, ou la route ne rend pas assez.
+
+    Le corpus fait diverger les trois : le modele restreint a un lead, la voie
+    directe en rend deux, la base un seul autre. Avec trois voies au meme
+    compte, le test passerait quelle que soit la voie lue pour chacune.
+    """
+    charge = comparer(
+        client_nominal({"departement": "06", "mois": 12, "limite": 1}),
+        executer=executer_sensible,
+        lire_la_base=lire_la_base_double(["A-AUTRE", "A-ENCORE", "A-TROIS"]),
+    )
+
+    assert charge["voies"]["agent"]["mesure"]["leads_rendus"] == 1
+    assert charge["voies"]["direct"]["mesure"]["leads_rendus"] == 2
+    assert charge["voies"]["base"]["mesure"]["leads_rendus"] == 3

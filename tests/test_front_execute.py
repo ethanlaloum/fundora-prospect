@@ -61,7 +61,7 @@ WEB = RACINE / "web"
 # `npm run verifier` (tsc --noEmit) et par `tests/test_types_web.py`.
 ARGUMENTS = ("--experimental-strip-types",)
 
-ASSERTIONS = ("format.test.ts", "client.test.ts")
+ASSERTIONS = ("format.test.ts", "client.test.ts", "comparatif.test.ts")
 
 
 def _node() -> str:
@@ -153,6 +153,13 @@ def test_le_refus_de_l_API_arrive_intact_a_l_ecran(
             "`${jour[3]}/${jour[2]}/${jour[1]}`",
             "`${jour[1]}/${jour[2]}/${jour[3]}`",
             "une date permutee reste une date bien formee",
+        ),
+        (
+            "comparatif.test.ts",
+            "src/comparatif.ts",
+            "return { disponible: true, texte: analyse.synthese, encarts: analyse.par_lead };",
+            "return { disponible: true, texte: analyse.synthese, encarts: {} };",
+            "une analyse disponible dont les encarts disparaissent reste plausible",
         ),
         (
             "client.test.ts",

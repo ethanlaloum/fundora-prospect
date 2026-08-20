@@ -85,6 +85,7 @@ export interface ReponseComparatif {
         appels_outil: Record<string, number | string>[];
         duree_ms: number;
         ids_rendus: string[];
+        leads_rendus: number;
         modele: string;
         tokens_cache_lus: number;
         tokens_entree: number;
@@ -96,12 +97,14 @@ export interface ReponseComparatif {
       ids: string[];
       mesure: {
         duree_ms: number;
+        leads_rendus: number;
       };
     };
     direct: {
       ids: string[];
       mesure: {
         duree_ms: number;
+        leads_rendus: number;
       };
     };
   };

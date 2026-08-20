@@ -631,3 +631,149 @@ h1 {
     grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
   }
 }
+
+/* --- Le comparatif ------------------------------------------------------------ */
+
+.lancer {
+  margin: 1.5rem 0 0;
+}
+
+.comparatif {
+  margin: 1rem 0 2rem;
+  padding: 1rem 1.1rem 1.2rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.5rem;
+  background: var(--fond-carte);
+}
+
+.comparatif h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--encre-douce);
+}
+
+/* Le verdict avant les colonnes : l'identite des deux voies est une
+ * AFFIRMATION de l'API, pas quelque chose que le lecteur deduit en alignant
+ * des chiffres. */
+.verdict {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.ecart {
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.4rem;
+}
+
+/* Les deux ecarts ne partagent NI style NI mot. S'ils se ressemblaient, le
+ * second se lirait comme le premier — et quelqu'un conclurait « le modele a
+ * filtre » sur un ecart qui ne dit que l'anciennete d'un balayage. */
+.ecart__effet_du_modele {
+  border: 2px solid var(--accent);
+  background: var(--fond);
+}
+
+.ecart__fraicheur_de_la_base {
+  border: 1px dashed var(--encre-douce);
+  background: none;
+}
+
+.voies {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+
+/* La base en retrait : elle mesure la fraicheur, pas le modele, et sa duree
+ * ecraserait les deux autres a l'oeil sans rien dire du sujet. */
+.voies--retrait {
+  margin-top: 0.5rem;
+  opacity: 0.72;
+}
+
+.voie {
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--trait);
+  border-radius: 0.4rem;
+  background: var(--fond);
+}
+
+.voie__agent {
+  border-left: 3px solid var(--accent);
+}
+
+.appels {
+  margin-top: 1.25rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--trait);
+}
+
+.appels-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.appel {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--trait);
+  border-radius: 0.4rem;
+  background: var(--fond);
+}
+
+.appel-rang {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--encre-douce);
+}
+
+/* --- L'analyse : du commentaire, jamais la source d'un chiffre ---------------- */
+
+.analyse,
+.analyse-encart {
+  border-left: 3px solid var(--attention);
+  background: #fdf8ee;
+}
+
+.analyse {
+  margin-top: 1.25rem;
+  padding: 0.8rem 1rem;
+  border-radius: 0 0.4rem 0.4rem 0;
+}
+
+/* Quand l'analyse manque, la reserve prend sa place. La degradation se voit a
+ * l'ecran, pas seulement dans la reponse — c'est le cas qui arrivera en
+ * demonstration le jour ou la clef expire. */
+.analyse--absente {
+  border-left-color: var(--alerte);
+  background: none;
+}
+
+.analyse--absente .analyse-texte {
+  color: var(--alerte);
+  font-style: italic;
+}
+
+.analyse-texte {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.analyse-encart {
+  margin: 0;
+  padding: 0.55rem 0.9rem;
+  font-size: 0.88rem;
+  font-style: italic;
+  color: var(--encre-douce);
+}

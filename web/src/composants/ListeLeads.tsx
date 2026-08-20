@@ -57,9 +57,23 @@ interface Props {
   /** Ouvre la fiche complete d'un evenement — revisions et transitions
    * comprises, que la liste ne porte pas. */
   onFiche: (identifiant: string) => void;
+  /** `{id: analyse}` du modele, sur l'ecran de comparatif. L'encart se trouve
+   * par ACCES A LA CLEF, jamais par appariement : chercher le bon lead pour
+   * chaque analyse serait du recalcul, et un lead sans entree n'en invente
+   * pas. Vide quand l'analyse est indisponible — donc aucun encart, et les
+   * leads restent entiers. */
+  analyses?: Record<string, string>;
 }
 
-function Fiche({ lead, onFiche }: { lead: Lead; onFiche: Props["onFiche"] }) {
+function Fiche({
+  lead,
+  onFiche,
+  analyse,
+}: {
+  lead: Lead;
+  onFiche: Props["onFiche"];
+  analyse: string | undefined;
+}) {
   const [ouvert, setOuvert] = useState(false);
 
   return (
@@ -86,6 +100,13 @@ function Fiche({ lead, onFiche }: { lead: Lead; onFiche: Props["onFiche"] }) {
         ))}
       </button>
 
+      {analyse ? (
+        // Zone visuellement distincte : c'est du commentaire, jamais la source
+        // d'un chiffre. Elle vit hors du depliage pour rester lisible sans
+        // ouvrir la carte.
+        <p className="analyse-encart">{analyse}</p>
+      ) : null}
+
       {ouvert ? (
         <>
           <DetailLead lead={lead} masquees={DANS_L_ENTETE} />
@@ -100,11 +121,16 @@ function Fiche({ lead, onFiche }: { lead: Lead; onFiche: Props["onFiche"] }) {
   );
 }
 
-export function ListeLeads({ leads, onFiche }: Props) {
+export function ListeLeads({ leads, onFiche, analyses }: Props) {
   return (
     <div className="leads">
       {leads.map((lead) => (
-        <Fiche key={lead.id} lead={lead} onFiche={onFiche} />
+        <Fiche
+          analyse={analyses?.[lead.id]}
+          key={lead.id}
+          lead={lead}
+          onFiche={onFiche}
+        />
       ))}
     </div>
   );
