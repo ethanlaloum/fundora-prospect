@@ -71,6 +71,25 @@ class MutationNonAppliquee(Exception):
     """
 
 
+class SuiteDejaRouge(Exception):
+    """La suite rougit AVANT toute mutation : aucune mesure n'est possible.
+
+    **Le troisieme visage du meme defaut, trouve en s'en servant.** Cet outil a
+    ete ecrit parce qu'une mutation non appliquee et une mutation non detectee
+    produisaient la meme sortie. Il restait un cas ou la sortie ne veut rien
+    dire non plus, et celui-la est pire : quand la suite est deja rouge, **tout
+    est DETECTEE**. Le lot affiche un sans-faute — la lecture la plus
+    rassurante possible — alors qu'aucune mutation n'a ete mesuree.
+
+    Mesure faite le 2026-08-21 sur la passe de design : sept mutations, sept
+    « DETECTEE », et les sept citaient le meme test rouge, qui n'avait aucun
+    rapport avec elles. Le detail le disait ; le total disait l'inverse.
+
+    D'ou la mesure de reference, une exception plutot qu'un verdict, et le cout
+    assume d'un lancement de suite en plus par lot.
+    """
+
+
 @dataclass(frozen=True)
 class Mutation:
     nom: str
@@ -178,6 +197,18 @@ def jouer(
     racine = racine or RACINE_DEFAUT
     resultats: list[Resultat] = []
 
+    # La mesure de reference. Sans elle, une suite deja rouge rend « DETECTEE »
+    # sur toute la ligne — voir `SuiteDejaRouge`. Elle est faite AVANT la
+    # premiere ecriture, donc un refus laisse le depot intact.
+    tracer("mesure de reference — suite en cours...")
+    rouge_au_depart, sortie = lancer(racine)
+    if rouge_au_depart:
+        raise SuiteDejaRouge(
+            "la suite rougit avant toute mutation : rien ne peut etre mesure. "
+            f"Premier echec : {_premier_echec(sortie) or 'inconnu'}"
+        )
+    tracer("mesure de reference : suite verte, la mesure peut avoir lieu")
+
     for rang, mutation in enumerate(mutations, 1):
         tracer(f"[{rang}/{len(mutations)}] {mutation.nom} — suite en cours...")
         depart = time.monotonic()
@@ -212,7 +243,14 @@ def _tracer(ligne: str) -> None:
 
 def main() -> int:
     lot = [Mutation(**brut) for brut in json.load(sys.stdin)]
-    resultats = jouer(lot, tracer=_tracer)
+    try:
+        resultats = jouer(lot, tracer=_tracer)
+    except SuiteDejaRouge as exc:
+        # Un lot refuse doit se lire comme un refus, jamais comme un resultat :
+        # c'est exactement la confusion que cet outil existe pour empecher.
+        print(f"\nMESURE IMPOSSIBLE — {exc}")
+        print("Reparer la suite d'abord ; un lot joue sur une suite rouge ne mesure rien.")
+        return 1
     print()
 
     largeur = max((len(r.mutation.nom) for r in resultats), default=0)

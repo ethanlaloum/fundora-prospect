@@ -61,7 +61,15 @@ export function Filtres({ valeurs, chargement, aides, onValider }: Props) {
       className="filtres"
       onSubmit={(evenement) => {
         evenement.preventDefault();
-        onValider(brouillon);
+        // Une COPIE, jamais `brouillon` lui-meme. Renvoyer la meme reference
+        // fait voir a React un etat inchange : l'ecran ne repart pas, et
+        // relancer la meme recherche — apres un redemarrage du serveur, par
+        // exemple — n'a aucun effet visible. Le bouton parait alors casse
+        // alors que c'est l'identite de l'objet qui n'a pas bouge.
+        //
+        // Chaque envoi est une demande distincte, meme a filtres identiques :
+        // c'est le CLIC qui declenche, pas le contenu.
+        onValider({ ...brouillon });
       }}
     >
       {CHAMPS_FILTRES.map((cle) => {
@@ -82,7 +90,7 @@ export function Filtres({ valeurs, chargement, aides, onValider }: Props) {
         );
       })}
       <button className="valider" type="submit" disabled={chargement}>
-        {chargement ? "…" : "Actualiser"}
+        {chargement ? "…" : "Rechercher"}
       </button>
     </form>
   );

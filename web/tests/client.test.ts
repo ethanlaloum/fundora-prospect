@@ -19,7 +19,6 @@ import { strict as assert } from "node:assert";
 import {
   FILTRES_VIDES,
   lireEcartes,
-  lireComparatif,
   lireEvenement,
   lireFiltres,
   lireLeads,
@@ -146,18 +145,18 @@ repondre({ resume: "phrase du coeur", leads: [] });
 const recue = await lireLeads(FILTRES_VIDES);
 assert.equal(recue.resume, "phrase du coeur");
 
-console.log("client.ts : toutes les assertions passent");
-
-// --- Le comparatif : un POST, et les champs vides restent absents -------------
+// --- Le comparatif est parti avec son ecran ----------------------------------
 //
-// Meme regle qu'en lecture. Envoyer `mois: ""` ferait refuser la requete par
-// FastAPI, ou obligerait le front a connaitre un defaut — ce qu'il s'interdit.
+// `lireComparatif` a ete retire par `ac683d4`, avec `Comparatif.tsx` et l'entree
+// `/comparatif` du generateur de types. Ces assertions lui ont survecu et
+// citaient un export qui n'existe plus : ce fichier ne se chargeait donc plus
+// du tout, et `tests/test_front_execute.py` etait rouge depuis ce commit — dont
+// le message dit lui-meme que la suite n'a pas ete menee a terme.
+//
+// Elles sont retirees plutot que la fonction restauree : la remettre exigerait
+// de rendre `/comparatif` au corpus du generateur, donc de defaire un pivot que
+// le commit annonce comme « a trancher ». Aligner le test sur ce qui a ete
+// supprime ne tranche rien ; git garde les deux moities le jour ou l'ecran
+// revient. La route `POST /comparatif`, elle, reste couverte cote Python.
 
-repondre({ leads: [] });
-await lireComparatif({ ...FILTRES_VIDES, departement: "06" });
-assert.equal(vues.at(-1), "/api/comparatif", "les filtres partent dans le corps");
-assert.equal(
-  corps.at(-1),
-  JSON.stringify({ departement: "06" }),
-  "et les champs vides n'y sont pas",
-);
+console.log("client.ts : toutes les assertions passent");

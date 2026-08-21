@@ -30,6 +30,8 @@
  * de `Date`.
  */
 
+import type { CSSProperties } from "react";
+
 /** La clef, rendue lisible. Aucune traduction : voir l'entete. */
 export function libelle(cle: string): string {
   return cle.replace(/_/g, " ");
@@ -75,6 +77,47 @@ export function valeur(cle: string, brute: unknown): string {
  * projet. */
 export function compte(brut: number): string {
   return nombre.format(brut);
+}
+
+/**
+ * Le rang d'un element dans sa liste, passe au CSS.
+ *
+ * Il sert au decalage de la cascade — chaque ligne apparait un cran apres la
+ * precedente. Le calcul du delai, son pas et son plafond vivent dans la feuille
+ * de style : le front ne multiplie rien, il transmet un rang. Ecrire
+ * `index * 24` ici mettrait une duree dans du TypeScript, hors du fichier de
+ * jetons, ou aucun verrou ne la verrait.
+ *
+ * Ce n'est pas un compteur : le rang ne decrit aucune population, il ordonne
+ * des elements deja rendus. Un `.length` n'aurait pas ete permis, celui-ci
+ * l'est — et il s'execute sous test, ce qu'une expression ecrite dans le JSX
+ * ne ferait pas.
+ */
+export function rang(index: number): CSSProperties {
+  return { "--rang": index } as CSSProperties;
+}
+
+/**
+ * Le score, passe au CSS pour etre dessine.
+ *
+ * Meme regle que `rang` : le front transmet la valeur, la feuille de style en
+ * fait une largeur. Ecrire la proportion ici la mettrait dans du TypeScript, et
+ * surtout ferait passer un champ numerique de l'API dans une expression —
+ * exactement ce que `tests/test_front_ne_recalcule_rien.py` interdit.
+ *
+ * Le jeton s'appelle `--jauge` et NON `--score`, pour la meme raison que les
+ * graisses s'appellent `--graisse-*` : un tiret devant le nom d'un champ
+ * numerique se lit comme une soustraction pour un balayage textuel, et le
+ * verrou l'a signale des la premiere execution. Il avait raison de le faire —
+ * distinguer les deux demanderait de savoir lire le CSS, pas de chercher un
+ * motif. C'est la troisieme fois sur ce projet : un nom de jeton ne reprend
+ * jamais un nom de champ.
+ *
+ * La jauge ne remplace pas le nombre, elle l'accompagne : une barre seule
+ * demanderait au lecteur d'estimer une valeur que l'API a rendue exacte.
+ */
+export function jauge(score: number): CSSProperties {
+  return { "--jauge": score } as CSSProperties;
 }
 
 /**

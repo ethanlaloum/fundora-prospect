@@ -1,12 +1,25 @@
 /*
  * Un seul fichier de styles, sans dependance.
  *
- * Les classes portent le nom de ce qu'elles habillent, et les modificateurs par
- * champ (`cellule__score`, `contribution__motif`) sont composes a partir de
- * CLEFS de l'API — jamais de valeurs. Aucune regle ne depend d'un motif de refus
- * ni d'un libelle de segment : `tests/test_front_sans_vocabulaire.py` balaye
- * aussi les feuilles de style, precisement parce qu'un libelle se cache tres
- * bien dans un `content:`.
+ * ## Aucune valeur de design ici
+ *
+ * Longueurs, couleurs, tailles de texte et durees vivent dans `theme.css` et
+ * n'existent ici que sous forme de `var(--…)`. Les seules valeurs ecrites en
+ * clair sont celles qui n'ont pas de jeton parce qu'elles n'ont pas d'echelle :
+ * `0`, `100%`, `1fr`, et les largeurs de colonne d'une grille — toutes posees
+ * sur le pas de 4 px.
+ *
+ * La regle est brutale pour la meme raison que le verrou de comptage l'est : une
+ * valeur ecrite en dur est indiscernable a la lecture d'une valeur du systeme,
+ * et une exception toleree une fois se tolere ensuite toujours.
+ *
+ * ## Les classes citent des CLEFS, jamais des valeurs
+ *
+ * Les modificateurs par champ (`cellule__score`, `contribution__motif`) sont
+ * composes a partir de CLEFS de l'API. Aucune regle ne depend d'un motif de
+ * refus ni d'un libelle de segment : `tests/test_front_sans_vocabulaire.py`
+ * balaye aussi les feuilles de style, precisement parce qu'un libelle se cache
+ * tres bien dans un `content:`.
  *
  * Le double tiret bas du modificateur n'est pas decoratif. Ecrit
  * `.cellule-montant_eur`, le selecteur presente un tiret suivi du nom d'un champ
@@ -15,21 +28,17 @@
  * faire : distinguer les deux demanderait de savoir lire le CSS et le JS, pas de
  * chercher un motif. Adopter une convention de nommage coute une seconde ;
  * assouplir le verrou couterait la garantie.
+ *
+ * Le meme verrou a fait renommer les jetons de graisse : `--poids-fort`
+ * presentait un tiret devant `poids`, qui est un champ du breakdown.
  */
 
+@import "./theme.css";
+
 :root {
-  --encre: #1a1a1a;
-  --encre-douce: #5c5c5c;
-  --fond: #fbfbf9;
-  --fond-carte: #ffffff;
-  --trait: #e0ddd6;
-  --accent: #1f5c4d;
-  --alerte: #8a3324;
-  /* Le segment `pp` : signale, jamais disqualifie. D'ou un ton distinct de
-   * celui des erreurs — ce n'est pas un defaut, c'est une base legale
-   * differente. */
-  --attention: #9a6b1f;
-  color-scheme: light;
+  /* Les controles natifs suivent le theme : sans ca, un champ de saisie ou
+   * une barre de defilement arrive en clair au milieu du sombre. */
+  color-scheme: dark;
 }
 
 * {
@@ -40,91 +49,169 @@ body {
   margin: 0;
   background: var(--fond);
   color: var(--encre);
-  font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: var(--taille-13) / var(--interligne) var(--police);
+  -webkit-font-smoothing: antialiased;
 }
 
 .page {
-  max-width: 68rem;
+  max-width: var(--largeur-page);
   margin: 0 auto;
-  padding: 2rem 1.5rem 5rem;
+  padding: var(--pas-32) var(--pas-24) var(--pas-48);
+}
+
+/* Le focus se voit partout de la meme facon, et il se voit sur l'accent : c'est
+ * le seul role de cette couleur — dire ce qui repond au clavier et a la souris. */
+:focus-visible {
+  outline: var(--marque) solid var(--accent);
+  outline-offset: var(--bordure);
 }
 
 /* --- Entete ---------------------------------------------------------------- */
 
 .entete {
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--pas-24);
 }
 
 h1 {
-  margin: 0 0 0.25rem;
-  font-size: 1.5rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  margin: 0 0 var(--pas-8);
+  font-family: var(--police-titre);
+  font-size: var(--taille-32);
+  font-weight: var(--graisse-forte);
+  letter-spacing: var(--suivi-titre);
+}
+
+/* Le seul emploi de l'accent hors de l'interactif, et il est structurel : il
+ * separe les deux moities de la marque au lieu de decorer un mot. */
+.marque-suite {
+  color: var(--accent);
 }
 
 .sous-titre {
   margin: 0;
-  max-width: 44rem;
+  max-width: 640px;
+  font-size: var(--taille-15);
   color: var(--encre-douce);
 }
 
 /* --- Filtres --------------------------------------------------------------- */
 
+/* La barre est UN objet, pas quatre champs dans une boite.
+ *
+ * Les saisies sont creusees dans la surface au lieu d'etre posees dessus, les
+ * champs sont separes par un trait plutot que par du vide, et le bouton est
+ * flush a droite. Ce qui la tenait avant, c'etait l'espacement ; ce qui la
+ * tient maintenant, c'est la structure.
+ *
+ * Cale par le HAUT, jamais par le bas : l'aide de saisie fait trois ou quatre
+ * lignes selon le champ, et un alignement par le bas reportait cet ecart sur
+ * les etiquettes, qui partaient a quatre hauteurs differentes. */
 .filtres {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0.75rem;
-  padding: 1rem;
-  border: 1px solid var(--trait);
-  border-radius: 0.5rem;
-  background: var(--fond-carte);
+  align-items: stretch;
+  gap: 0;
+  border: var(--bordure) solid var(--trait);
+  border-radius: var(--rayon-carte);
+  background: var(--surface);
 }
 
 .filtre {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  flex: 1 1 11rem;
+  gap: var(--pas-4);
+  flex: 1 1 176px;
+  padding: var(--pas-12) var(--pas-16);
+  border-right: var(--bordure) solid var(--trait);
+}
+
+/* Le dernier champ ne porte pas de separateur : il n'a rien a separer de la
+ * bordure du conteneur, qui est deja la. */
+.filtre:last-of-type {
+  border-right: 0;
 }
 
 .filtre-clef {
-  font-size: 0.75rem;
-  letter-spacing: 0.04em;
+  font-size: var(--taille-12);
+  font-weight: var(--graisse-moyenne);
+  letter-spacing: var(--suivi-capitales);
   text-transform: uppercase;
   color: var(--encre-douce);
 }
 
 .filtre-saisie {
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--trait);
-  border-radius: 0.35rem;
+  width: 100%;
+  padding: var(--pas-8) var(--pas-12);
+  border: var(--bordure) solid transparent;
+  border-radius: var(--rayon-bouton);
   background: var(--fond);
   color: inherit;
   font: inherit;
+  transition:
+    border-color var(--duree-survol) var(--sortie),
+    background var(--duree-survol) var(--sortie);
+}
+
+.filtre-saisie:hover {
+  border-color: var(--trait);
+}
+
+.filtre-saisie:focus {
+  border-color: var(--accent);
+  outline: 0;
 }
 
 /* L'unite du champ, servie par `/filtres`. Sans elle, « mois » a ete rempli
- * avec un nom de mois et « limite » lue comme des millions d'euros. */
+ * avec un nom de mois et « limite » lue comme des millions d'euros.
+ *
+ * Elle ne parait qu'au FOCUS, et en flottant : trois lignes de prose sous
+ * chaque champ occupaient plus de place que la barre elle-meme, et personne ne
+ * les lit avant d'avoir un doute. Le flottement evite que leur apparition
+ * pousse la page — c'est le seul element du site qui passe au-dessus d'un
+ * autre, donc le seul qui porte une ombre. */
 .filtre-aide {
-  font-size: 0.72rem;
-  line-height: 1.35;
+  position: absolute;
+  top: 100%;
+  left: var(--pas-8);
+  right: var(--pas-8);
+  z-index: 2;
+  padding: var(--pas-8) var(--pas-12);
+  border: var(--bordure) solid var(--trait);
+  border-radius: var(--rayon-bouton);
+  background: var(--survol);
+  box-shadow: var(--ombre-flottant);
+  font-size: var(--taille-12);
+  line-height: var(--interligne-serre);
   color: var(--encre-douce);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--duree-survol) var(--sortie),
+    visibility var(--duree-survol) var(--sortie);
 }
 
-.filtre-saisie:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.filtre:focus-within .filtre-aide,
+.filtre:hover .filtre-aide {
+  opacity: 1;
+  visibility: visible;
 }
 
 .valider {
-  padding: 0.5rem 1.1rem;
-  border: 1px solid var(--accent);
-  border-radius: 0.35rem;
+  align-self: stretch;
+  margin: var(--pas-12) var(--pas-16);
+  padding: var(--pas-8) var(--pas-16);
+  border: var(--bordure) solid var(--accent);
+  border-radius: var(--rayon-bouton);
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contraste);
   font: inherit;
+  font-weight: var(--graisse-moyenne);
   cursor: pointer;
+  transition: opacity var(--duree-survol) var(--sortie);
+}
+
+.valider:hover {
+  opacity: 0.88;
 }
 
 .valider[disabled] {
@@ -135,44 +222,50 @@ h1 {
 /* --- Ce que l'API a decide -------------------------------------------------- */
 
 .resume {
-  margin: 1.5rem 0 0.75rem;
-  padding: 0.9rem 1rem;
-  border-left: 3px solid var(--accent);
-  background: var(--fond-carte);
-  font-size: 0.95rem;
+  margin: var(--pas-24) 0 var(--pas-12);
+  padding: var(--pas-12) var(--pas-16);
+  border: var(--bordure) solid var(--trait);
+  border-left: var(--marque) solid var(--accent);
+  border-radius: var(--rayon-carte);
+  background: var(--surface);
+  font-size: var(--taille-15);
 }
 
 .erreur {
-  margin: 1rem 0 0;
-  padding: 0.9rem 1rem;
-  border-left: 3px solid var(--alerte);
-  background: var(--fond-carte);
-  color: var(--alerte);
+  margin: var(--pas-16) 0 0;
+  padding: var(--pas-12) var(--pas-16);
+  border: var(--bordure) solid var(--trait);
+  border-left: var(--marque) solid var(--etat-alerte);
+  border-radius: var(--rayon-carte);
+  background: var(--surface);
+  color: var(--etat-alerte);
 }
 
 .requete {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 2rem;
-  margin: 0 0 1.5rem;
+  gap: var(--pas-8) var(--pas-32);
+  margin: 0 0 var(--pas-24);
 }
 
 .champ {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: var(--pas-4);
   min-width: 0;
 }
 
 .champ dt {
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
+  font-size: var(--taille-12);
+  font-weight: var(--graisse-moyenne);
+  letter-spacing: var(--suivi-capitales);
   text-transform: uppercase;
   color: var(--encre-douce);
 }
 
 .champ dd {
   margin: 0;
+  font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
 
@@ -180,8 +273,8 @@ h1 {
 
 .compteurs {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
-  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(152px, 1fr));
+  gap: var(--pas-8);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -190,41 +283,61 @@ h1 {
 .compteur {
   display: flex;
   flex-direction: column;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--trait);
-  border-radius: 0.4rem;
-  background: var(--fond-carte);
+  gap: var(--pas-4);
+  padding: var(--pas-12);
+  border: var(--bordure) solid var(--trait);
+  border-radius: var(--rayon-carte);
+  background: var(--surface);
+}
+
+.lead,
+.compteur {
+  transition: border-color var(--duree-survol) var(--sortie);
+}
+
+.lead:hover,
+.compteur:hover {
+  border-color: var(--encre-douce);
 }
 
 .compteur-valeur {
-  font-size: 1.25rem;
+  font-size: var(--taille-19);
+  font-weight: var(--graisse-forte);
   font-variant-numeric: tabular-nums;
+  letter-spacing: var(--suivi-titre);
+  line-height: var(--interligne-serre);
 }
 
 .compteur-clef {
-  font-size: 0.72rem;
-  letter-spacing: 0.03em;
+  font-size: var(--taille-12);
+  font-weight: var(--graisse-moyenne);
+  letter-spacing: var(--suivi-capitales);
+  line-height: var(--interligne-serre);
   text-transform: uppercase;
   color: var(--encre-douce);
 }
 
-/* Une reserve n'est rendue que lorsqu'elle mord — voir `Compteurs.tsx`. */
+/* Une reserve n'est rendue que lorsqu'elle mord — voir `Compteurs.tsx`. Elle
+ * porte la couleur de signal, pas celle d'alerte : une reserve dit que le
+ * chiffre voisin decrit moins que ce qu'on croit, elle n'annonce pas une
+ * panne. */
 .reserve {
-  margin: 0.6rem 0 0;
-  padding: 0.5rem 0.75rem;
-  border: 1px dashed var(--alerte);
-  border-radius: 0.4rem;
-  color: var(--alerte);
-  font-size: 0.85rem;
+  margin: var(--pas-8) 0 0;
+  padding: var(--pas-8) var(--pas-12);
+  border: var(--bordure) dashed var(--etat-signal);
+  border-radius: var(--rayon-bouton);
+  color: var(--etat-signal);
+  font-size: var(--taille-12);
+  font-weight: var(--graisse-moyenne);
+  letter-spacing: var(--suivi-capitales);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .refus {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  margin: 0.75rem 0 1.5rem;
+  gap: var(--pas-4);
+  margin: var(--pas-12) 0 var(--pas-24);
   padding: 0;
   list-style: none;
 }
@@ -234,34 +347,37 @@ h1 {
 .refus-motif {
   display: inline-flex;
   align-items: baseline;
-  gap: 0.4rem;
-  padding: 0.25rem 0.6rem;
-  border: 1px solid var(--trait);
-  border-radius: 999px;
-  background: var(--fond-carte);
+  gap: var(--pas-8);
+  padding: var(--pas-4) var(--pas-8);
+  border: var(--bordure) solid var(--trait);
+  border-radius: var(--rayon-bouton);
+  background: var(--surface);
   color: inherit;
   font: inherit;
-  font-size: 0.85rem;
   cursor: pointer;
+  transition:
+    background var(--duree-survol) var(--sortie),
+    border-color var(--duree-survol) var(--sortie);
 }
 
 .refus-motif:hover {
+  background: var(--survol);
   border-color: var(--encre-douce);
 }
 
 .refus-motif.ouvert {
   border-color: var(--accent);
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contraste);
 }
 
 .refus-motif.ouvert .refus-libelle {
-  color: #fff;
+  color: var(--accent-contraste);
 }
 
 .refus-compte {
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
+  font-weight: var(--graisse-forte);
 }
 
 .refus-libelle {
@@ -272,40 +388,44 @@ h1 {
 
 .fiche {
   display: block;
-  margin: 1.5rem 0;
-  padding: 1rem 1.1rem 1.2rem;
-  border: 1px solid var(--accent);
-  border-radius: 0.5rem;
-  background: var(--fond-carte);
+  margin: var(--pas-24) 0;
+  padding: var(--pas-16);
+  border: var(--bordure) solid var(--accent);
+  border-radius: var(--rayon-carte);
+  background: var(--surface);
+  animation: apparaitre var(--duree-apparition) var(--sortie);
 }
 
 .fiche-entete {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 0.75rem;
-  padding-bottom: 0.6rem;
-  border-bottom: 1px solid var(--trait);
+  gap: var(--pas-16);
+  margin-bottom: var(--pas-12);
+  padding-bottom: var(--pas-12);
+  border-bottom: var(--bordure) solid var(--trait);
 }
 
 .fiche-entete h2 {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--encre-douce);
+  font-size: var(--taille-15);
+  font-weight: var(--graisse-forte);
+  letter-spacing: var(--suivi-titre);
 }
 
 .fermer {
-  padding: 0.1rem 0.5rem;
-  border: 1px solid var(--trait);
-  border-radius: 0.3rem;
+  padding: var(--pas-4) var(--pas-8);
+  border: var(--bordure) solid var(--trait);
+  border-radius: var(--rayon-bouton);
   background: none;
   color: var(--encre-douce);
   font: inherit;
   cursor: pointer;
+  transition: background var(--duree-survol) var(--sortie);
+}
+
+.fermer:hover {
+  background: var(--survol);
 }
 
 .fiche .lead-detail,
@@ -316,16 +436,16 @@ h1 {
 }
 
 .fiche-section {
-  margin-top: 1.1rem;
-  padding-top: 0.8rem;
-  border-top: 1px solid var(--trait);
+  margin-top: var(--pas-16);
+  padding-top: var(--pas-12);
+  border-top: var(--bordure) solid var(--trait);
 }
 
 .fiche-section h3 {
-  margin: 0 0 0.35rem;
-  font-size: 0.72rem;
-  font-weight: 500;
-  letter-spacing: 0.05em;
+  margin: 0 0 var(--pas-8);
+  font-size: var(--taille-12);
+  font-weight: var(--graisse-moyenne);
+  letter-spacing: var(--suivi-capitales);
   text-transform: uppercase;
   color: var(--encre-douce);
 }
@@ -334,8 +454,8 @@ h1 {
  * vide : c'est la qu'elle distingue « cette societe n'a pas bouge » de
  * « aucune societe n'est identifiee ». */
 .attribution {
-  margin: 0 0 0.6rem;
-  font-size: 0.85rem;
+  margin: 0 0 var(--pas-8);
+  font-variant-numeric: tabular-nums;
   color: var(--encre-douce);
 }
 
@@ -343,7 +463,7 @@ h1 {
 .transitions {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: var(--pas-8);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -351,65 +471,72 @@ h1 {
 
 .revision,
 .transition {
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--trait);
-  border-radius: 0.4rem;
+  padding: var(--pas-12);
+  border: var(--bordure) solid var(--trait);
+  border-radius: var(--rayon-carte);
   background: var(--fond);
 }
 
 .revision-date {
-  margin: 0 0 0.4rem;
-  font-size: 0.78rem;
-  letter-spacing: 0.03em;
+  margin: 0 0 var(--pas-4);
+  font-size: var(--taille-12);
+  font-weight: var(--graisse-moyenne);
+  letter-spacing: var(--suivi-capitales);
   text-transform: uppercase;
   color: var(--encre-douce);
 }
 
 .vers-la-fiche {
-  margin: 0.6rem 0 0;
+  margin: var(--pas-8) 0 0;
 }
 
 .lien {
-  padding: 0.2rem 0.5rem;
-  border: 1px solid var(--trait);
-  border-radius: 0.3rem;
+  padding: var(--pas-4) var(--pas-8);
+  border: var(--bordure) solid var(--trait);
+  border-radius: var(--rayon-bouton);
   background: none;
   color: var(--accent);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--taille-12);
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
+  transition:
+    background var(--duree-survol) var(--sortie),
+    border-color var(--duree-survol) var(--sortie);
 }
 
 .lien:hover {
   border-color: var(--accent);
+  background: var(--survol);
 }
 
 .lead .vers-la-fiche {
-  padding: 0 0.9rem 0.9rem;
+  margin: 0;
+  padding: 0 var(--pas-16) var(--pas-16);
   background: var(--fond);
 }
 
 /* --- Les refus, listes ------------------------------------------------------- */
 
 .ecartes {
-  margin: 0 0 1.5rem;
-  padding: 0.9rem 1rem;
-  border: 1px solid var(--trait);
-  border-left: 3px solid var(--encre-douce);
-  border-radius: 0.45rem;
-  background: var(--fond-carte);
+  margin: 0 0 var(--pas-24);
+  padding: var(--pas-16);
+  border: var(--bordure) solid var(--trait);
+  border-radius: var(--rayon-carte);
+  background: var(--surface);
+  animation: apparaitre var(--duree-apparition) var(--sortie);
 }
 
 .ecartes-compte {
-  margin: 0 0 0.75rem;
-  font-size: 0.9rem;
+  margin: 0 0 var(--pas-12);
+  font-variant-numeric: tabular-nums;
   color: var(--encre-douce);
 }
 
 .ecartes-liste {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: var(--pas-8);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -417,58 +544,58 @@ h1 {
 
 /* Une fiche de faits, pas une ligne classee : un ecarte n'a ni rang, ni score,
  * ni provenance — l'API n'en rend aucun, et sa mise en forme ne doit pas
- * suggerer le contraire. */
+ * suggerer le contraire. D'ou le fond en retrait et l'absence de tout ce qui
+ * signale un lead : pas de bordure d'accent, pas de chiffre mis en avant. */
 .ecarte {
-  padding: 0.7rem 0.9rem;
-  border: 1px solid var(--trait);
-  border-radius: 0.4rem;
+  padding: var(--pas-12);
+  border: var(--bordure) solid var(--trait);
+  border-radius: var(--rayon-carte);
   background: var(--fond);
 }
 
 /* --- Les sorties du flux ----------------------------------------------------- */
 
 .sorties {
-  margin: 2.5rem 0 0;
-  padding: 1rem 1.1rem 1.2rem;
-  border: 1px solid var(--trait);
-  border-top: 3px solid var(--attention);
-  border-radius: 0.5rem;
-  background: var(--fond-carte);
+  margin: var(--pas-32) 0 0;
+  padding: var(--pas-16);
+  border: var(--bordure) solid var(--trait);
+  border-top: var(--marque) solid var(--etat-signal);
+  border-radius: var(--rayon-carte);
+  background: var(--surface);
 }
 
 .sorties h2 {
-  margin: 0 0 0.75rem;
-  font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  margin: 0 0 var(--pas-12);
+  font-size: var(--taille-15);
+  font-weight: var(--graisse-forte);
+  letter-spacing: var(--suivi-titre);
 }
 
 .filtre--seul {
-  max-width: 12rem;
-  margin-bottom: 0.75rem;
+  max-width: 192px;
+  margin-bottom: var(--pas-12);
 }
 
 .sorties-compte {
-  margin: 0 0 0.75rem;
-  font-size: 0.9rem;
+  margin: 0 0 var(--pas-12);
+  font-variant-numeric: tabular-nums;
   color: var(--encre-douce);
 }
 
 .sorties-liste {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--pas-8);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .sortie {
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--trait);
-  border-left: 3px solid var(--attention);
-  border-radius: 0.4rem;
+  padding: var(--pas-12);
+  border: var(--bordure) solid var(--trait);
+  border-left: var(--marque) solid var(--etat-signal);
+  border-radius: var(--rayon-carte);
   background: var(--fond);
 }
 
@@ -479,17 +606,23 @@ h1 {
  * pas dans un meme export sans le champ qui les separe. La marque visuelle
  * porte cette distinction-la, pas une nuance de presentation.
  *
+ * C'est la seule chose que la couleur porte dans une carte de lead. Tout le
+ * reste de la hierarchie — le score au-dessus du nom, le nom au-dessus du
+ * departement — vient de la taille et du poids. Une distinction juridique, elle,
+ * ne peut pas se lire dans une graisse : elle doit sauter aux yeux sur une liste
+ * de vingt-cinq lignes.
+ *
  * Le selecteur cite le CODE du segment, jamais son libelle. Le libelle est une
  * valeur du coeur : il arrive par `type_cedant_libelle` et s'affiche tel quel.
  * L'ecrire ici en ferait une seconde source, et le verrou de vocabulaire l'a
  * d'ailleurs signale des la premiere execution — dans ce commentaire meme. */
 .segment__pp {
-  border-left: 3px solid var(--attention);
+  border-left: var(--marque) solid var(--etat-signal);
 }
 
 .lead.segment__pp .cellule__type_cedant_libelle .cellule-valeur {
-  font-weight: 600;
-  color: var(--attention);
+  font-weight: var(--graisse-forte);
+  color: var(--etat-signal);
 }
 
 /* --- Leads ------------------------------------------------------------------ */
@@ -497,83 +630,194 @@ h1 {
 .leads {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: var(--pas-4);
 }
 
 .lead {
-  border: 1px solid var(--trait);
-  border-radius: 0.45rem;
-  background: var(--fond-carte);
+  border: var(--bordure) solid var(--trait);
+  border-radius: var(--rayon-carte);
+  background: var(--surface);
   overflow: hidden;
 }
 
+/* Ouvert : la bordure passe a l'accent, qui ne sert qu'a ca — dire ce qui est
+ * interactif et ce qui est en cours. Le fond ne change pas ; deux signaux pour
+ * un seul etat feraient croire a deux etats. */
 .lead.ouvert {
   border-color: var(--accent);
 }
 
+/* L'en-tete et la carte partagent LA MEME regle de grille : deux declarations
+ * se seraient desalignees au premier ajustement de colonne, et un en-tete
+ * decale d'un cran est pire que pas d'en-tete du tout — il attribue chaque
+ * valeur a la mauvaise clef. Le `border` transparent et le meme padding font tomber les
+ * colonnes exactement au meme endroit que dans une carte bordee. */
+.leads-entete,
 .lead-entete {
   display: grid;
-  grid-template-columns: 4.5rem minmax(9rem, 2fr) minmax(7rem, 1fr) minmax(7rem, 1fr) 5.5rem 4.5rem minmax(6rem, 1fr);
-  gap: 0.5rem 1rem;
+  /* Sept colonnes sur UNE ligne, et les minimums sont calibres pour ca : leur
+   * somme plus les gouttieres tient dans la largeur utile jusqu'a ~800 px. Une
+   * colonne de trop qui passe a la ligne ne se lit pas comme un retour a la
+   * ligne mais comme un trou dans la fiche. */
+  grid-template-columns:
+    56px minmax(168px, 2fr) minmax(148px, 1.2fr) minmax(104px, 1fr)
+    104px 100px minmax(112px, 1fr);
+  gap: var(--pas-8) var(--pas-16);
+  align-items: baseline;
   width: 100%;
-  padding: 0.7rem 0.9rem;
+  padding: var(--pas-12) var(--pas-16);
   border: 0;
   background: none;
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: background var(--duree-survol) var(--sortie);
+}
+
+.leads-entete {
+  border: var(--bordure) solid transparent;
+  padding-bottom: var(--pas-4);
+  font-size: var(--taille-12);
+  font-weight: var(--graisse-moyenne);
+  letter-spacing: var(--suivi-capitales);
+  text-transform: uppercase;
+  color: var(--encre-douce);
+}
+
+.leads-entete .cellule {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Les clefs par cellule ne servent que dans le repli, ou il n'y a plus
+ * d'en-tete pour les porter. Les deux bascules sont dans la meme feuille et se
+ * repondent : une colonne ne doit jamais se retrouver sans son nom. */
+.lead-entete .cellule-clef {
+  display: none;
 }
 
 .lead-entete:hover {
-  background: #f4f2ec;
+  background: var(--survol);
+}
+
+.lead-entete:focus-visible {
+  outline-offset: calc(-1 * var(--marque));
 }
 
 .cellule {
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
+  gap: var(--pas-4);
   min-width: 0;
 }
 
+/* La clef ne se coupe pas en deux lignes : elle decalerait la valeur de sa
+ * cellule d'un cran, et une colonne de valeurs qui ne s'aligne plus est
+ * exactement ce que la chasse fixe des chiffres cherche a obtenir. */
 .cellule-clef {
-  font-size: 0.66rem;
-  letter-spacing: 0.03em;
+  font-size: var(--taille-12);
+  font-weight: var(--graisse-moyenne);
+  line-height: var(--interligne-serre);
+  letter-spacing: var(--suivi-capitales);
   text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--encre-douce);
 }
 
+/* Les valeurs d'une carte sont alignees verticalement d'une carte a l'autre :
+ * chiffres a chasse fixe partout, sans citer un seul nom de champ. Une regle
+ * par champ numerique serait a mettre a jour au prochain champ rendu. */
 .cellule-valeur {
   overflow: hidden;
+  font-size: var(--taille-13);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--interligne-serre);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Le score est le rang du dossier : il se lit en premier, donc il est plus
+ * gros. Il n'est pas colore — la taille suffit, et l'accent a un autre role. */
 .cellule__score .cellule-valeur {
-  font-size: 1.15rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--accent);
+  font-size: var(--taille-19);
+  font-weight: var(--graisse-forte);
+  letter-spacing: var(--suivi-titre);
 }
 
-.cellule__montant_eur .cellule-valeur,
-.cellule__jours_ecoules .cellule-valeur {
-  font-variant-numeric: tabular-nums;
+/* La jauge : le score sur 100, dessine. Elle rend comparable d'un coup d'oeil
+ * ce qu'une colonne de nombres oblige a lire ligne a ligne — et sur une liste
+ * classee, c'est l'ECART entre deux rangs qui informe, pas la valeur absolue.
+ *
+ * La largeur est calculee ici, jamais en TypeScript : le front transmet la
+ * valeur par `--jauge` et ne la multiplie pas. Le jeton ne s'appelle pas
+ * `--score` : voir `format.jauge`, le verrou de recalcul lit des noms. */
+.jauge {
+  position: relative;
+  height: var(--marque);
+  margin-top: var(--pas-4);
+  border-radius: var(--rayon-bouton);
+  background: var(--trait);
+  overflow: hidden;
+}
+
+.jauge::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--jauge, 0) * 1%);
+  background: var(--accent);
+}
+
+/* Sur une liste, la jauge n'a de sens qu'en regard des autres : dans le repli
+ * ou dans une fiche isolee, elle compare a rien. */
+.leads-entete .jauge,
+.fiche .jauge {
+  display: none;
+}
+
+.cellule__cedant .cellule-valeur {
+  font-weight: var(--graisse-moyenne);
+}
+
+/* Le depliage : hauteur et opacite, une seule fois, 180 ms.
+ *
+ * La hauteur s'anime par la ligne de grille — `0fr` vers `1fr` — parce qu'une
+ * hauteur `auto` ne s'interpole pas et qu'aucune autre voie ne l'obtient sans
+ * mesurer le contenu en JavaScript. Le front ne mesure rien : ce serait un
+ * calcul, et le verrou le refuserait a juste titre. */
+.lead-deplie {
+  display: grid;
+  grid-template-rows: 1fr;
+  animation: deplier var(--duree-depliage) var(--sortie);
+}
+
+/* L'enveloppe interieure existe pour que la ligne animee n'en contienne qu'un :
+ * une grille a deux enfants place le second dans une ligne implicite, que le
+ * `0fr` ne touche pas — le detail se deplierait, le lien apparaitrait d'un
+ * coup. `overflow: hidden` est ce qui laisse la ligne etre plus courte que son
+ * contenu pendant l'animation. */
+.lead-deplie-contenu {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .lead-detail {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding: 0.9rem;
-  border-top: 1px solid var(--trait);
+  gap: var(--pas-16);
+  padding: var(--pas-16);
+  border-top: var(--bordure) solid var(--trait);
   background: var(--fond);
 }
 
 .champs {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
-  gap: 0.6rem 1.25rem;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: var(--pas-12) var(--pas-24);
   margin: 0;
 }
 
@@ -586,30 +830,34 @@ h1 {
 .breakdown {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.88rem;
+  font-size: var(--taille-13);
+  font-variant-numeric: tabular-nums;
 }
 
 .breakdown th {
-  padding: 0.3rem 0.5rem;
-  border-bottom: 1px solid var(--trait);
-  font-size: 0.7rem;
-  font-weight: 500;
-  letter-spacing: 0.04em;
+  padding: var(--pas-4) var(--pas-8);
+  border-bottom: var(--bordure) solid var(--trait);
+  font-size: var(--taille-12);
+  font-weight: var(--graisse-moyenne);
+  letter-spacing: var(--suivi-capitales);
   text-align: left;
   text-transform: uppercase;
   color: var(--encre-douce);
 }
 
 .breakdown td {
-  padding: 0.35rem 0.5rem;
-  border-bottom: 1px solid var(--trait);
+  padding: var(--pas-8);
+  border-bottom: var(--bordure) solid var(--trait);
   vertical-align: top;
+}
+
+.breakdown tr:last-child td {
+  border-bottom: 0;
 }
 
 .contribution__points,
 .contribution__poids {
-  width: 4rem;
-  font-variant-numeric: tabular-nums;
+  width: 64px;
 }
 
 /* Le motif porte le detail du calcul : il sort ENTIER, jamais tronque — et
@@ -622,35 +870,60 @@ h1 {
 }
 
 .vide {
-  margin: 1.5rem 0 0;
+  margin: var(--pas-24) 0 0;
   color: var(--encre-douce);
 }
 
-@media (max-width: 60rem) {
+/* Avant la premiere recherche, l'ecran ne montre AUCUN chiffre : il n'y en a
+ * pas encore, et en afficher un — meme a zero — se lirait comme un resultat.
+ * Il dit ce qu'il attend, et rien d'autre. */
+.avant-recherche {
+  margin: var(--pas-32) 0 0;
+  padding: var(--pas-48) var(--pas-24);
+  border: var(--bordure) dashed var(--trait);
+  border-radius: var(--rayon-carte);
+  text-align: center;
+  font-size: var(--taille-15);
+  color: var(--encre-douce);
+}
+
+/* Le repli n'arrive qu'une fois la ligne reellement impossible. A 960 px il
+ * mordait sur des ecrans ou les sept colonnes tenaient parfaitement, et la
+ * fiche se cassait en 5 + 2 avec des trous. */
+@media (max-width: 800px) {
   .lead-entete {
-    grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  }
+
+  .leads-entete {
+    display: none;
+  }
+
+  .lead-entete .cellule-clef {
+    display: block;
   }
 }
 
 /* --- Le comparatif ------------------------------------------------------------ */
 
 .lancer {
-  margin: 1.5rem 0 0;
+  margin: var(--pas-24) 0 0;
 }
 
 .comparatif {
-  margin: 1rem 0 2rem;
-  padding: 1rem 1.1rem 1.2rem;
-  border: 1px solid var(--accent);
-  border-radius: 0.5rem;
-  background: var(--fond-carte);
+  margin: var(--pas-16) 0 var(--pas-32);
+  padding: var(--pas-16);
+  border: var(--bordure) solid var(--accent);
+  border-radius: var(--rayon-carte);
+  background: var(--surface);
+  animation: apparaitre var(--duree-apparition) var(--sortie);
 }
 
 .comparatif h3 {
-  margin: 0 0 0.4rem;
-  font-size: 0.72rem;
-  font-weight: 500;
-  letter-spacing: 0.05em;
+  margin: 0 0 var(--pas-8);
+  font-size: var(--taille-12);
+  font-weight: var(--graisse-moyenne);
+  letter-spacing: var(--suivi-capitales);
   text-transform: uppercase;
   color: var(--encre-douce);
 }
@@ -660,63 +933,63 @@ h1 {
  * des chiffres. */
 .verdict {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
-  gap: 0.75rem;
-  margin-bottom: 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(288px, 1fr));
+  gap: var(--pas-12);
+  margin-bottom: var(--pas-24);
 }
 
 .ecart {
-  padding: 0.75rem 0.9rem;
-  border-radius: 0.4rem;
+  padding: var(--pas-12) var(--pas-16);
+  border-radius: var(--rayon-carte);
 }
 
 /* Les deux ecarts ne partagent NI style NI mot. S'ils se ressemblaient, le
  * second se lirait comme le premier — et quelqu'un conclurait « le modele a
  * filtre » sur un ecart qui ne dit que l'anciennete d'un balayage. */
 .ecart__effet_du_modele {
-  border: 2px solid var(--accent);
+  border: var(--marque) solid var(--accent);
   background: var(--fond);
 }
 
 .ecart__fraicheur_de_la_base {
-  border: 1px dashed var(--encre-douce);
+  border: var(--bordure) dashed var(--encre-douce);
   background: none;
 }
 
 .voies {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(224px, 1fr));
+  gap: var(--pas-12);
 }
 
 /* La base en retrait : elle mesure la fraicheur, pas le modele, et sa duree
  * ecraserait les deux autres a l'oeil sans rien dire du sujet. */
 .voies--retrait {
-  margin-top: 0.5rem;
+  margin-top: var(--pas-8);
   opacity: 0.72;
 }
 
 .voie {
-  padding: 0.7rem 0.85rem;
-  border: 1px solid var(--trait);
-  border-radius: 0.4rem;
+  padding: var(--pas-12);
+  border: var(--bordure) solid var(--trait);
+  border-radius: var(--rayon-carte);
   background: var(--fond);
 }
 
 .voie__agent {
-  border-left: 3px solid var(--accent);
+  border-left: var(--marque) solid var(--accent);
 }
 
 .appels {
-  margin-top: 1.25rem;
-  padding-top: 0.8rem;
-  border-top: 1px solid var(--trait);
+  margin-top: var(--pas-24);
+  padding-top: var(--pas-12);
+  border-top: var(--bordure) solid var(--trait);
 }
 
 .appels-liste {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--pas-8);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -725,16 +998,16 @@ h1 {
 .appel {
   display: flex;
   align-items: baseline;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--trait);
-  border-radius: 0.4rem;
+  gap: var(--pas-12);
+  padding: var(--pas-8) var(--pas-12);
+  border: var(--bordure) solid var(--trait);
+  border-radius: var(--rayon-carte);
   background: var(--fond);
+  font-variant-numeric: tabular-nums;
 }
 
 .appel-rang {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
+  font-weight: var(--graisse-forte);
   color: var(--encre-douce);
 }
 
@@ -742,38 +1015,128 @@ h1 {
 
 .analyse,
 .analyse-encart {
-  border-left: 3px solid var(--attention);
-  background: #fdf8ee;
+  border-left: var(--marque) solid var(--etat-signal);
+  background: var(--etat-signal-fond);
 }
 
 .analyse {
-  margin-top: 1.25rem;
-  padding: 0.8rem 1rem;
-  border-radius: 0 0.4rem 0.4rem 0;
+  margin-top: var(--pas-24);
+  padding: var(--pas-12) var(--pas-16);
+  border-radius: 0 var(--rayon-carte) var(--rayon-carte) 0;
 }
 
 /* Quand l'analyse manque, la reserve prend sa place. La degradation se voit a
  * l'ecran, pas seulement dans la reponse — c'est le cas qui arrivera en
  * demonstration le jour ou la clef expire. */
 .analyse--absente {
-  border-left-color: var(--alerte);
+  border-left-color: var(--etat-alerte);
   background: none;
 }
 
 .analyse--absente .analyse-texte {
-  color: var(--alerte);
+  color: var(--etat-alerte);
   font-style: italic;
 }
 
 .analyse-texte {
   margin: 0;
-  font-size: 0.92rem;
+  font-size: var(--taille-15);
 }
 
 .analyse-encart {
   margin: 0;
-  padding: 0.55rem 0.9rem;
-  font-size: 0.88rem;
+  padding: var(--pas-8) var(--pas-16);
   font-style: italic;
   color: var(--encre-douce);
+}
+
+/* --- Chargement et apparition -------------------------------------------------
+ *
+ * Un squelette, pas un tourniquet : il occupe la place que les resultats
+ * prendront, donc l'ecran ne saute pas quand ils arrivent. Il ne porte AUCUN
+ * texte — un faux chiffre le temps du chargement se lirait comme un resultat,
+ * et c'est le defaut que ce projet traque partout ailleurs.
+ *
+ * Il n'est montre que la ou l'ecran serait vide. Un rechargement de filtres
+ * garde les resultats precedents : les remplacer par des blocs gris ferait
+ * disparaitre le resume et les compteurs, c'est-a-dire ce qui permet de
+ * comprendre ce qu'on regarde. */
+.squelette {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pas-8);
+  margin-top: var(--pas-24);
+}
+
+.squelette-bloc {
+  height: 64px;
+  border: var(--bordure) solid var(--trait);
+  border-radius: var(--rayon-carte);
+  background: var(--fond);
+}
+
+.squelette-bloc--resume {
+  height: 48px;
+}
+
+.resultats {
+  animation: apparaitre var(--duree-apparition) var(--sortie);
+}
+
+/* La cascade : chaque ligne apparait un cran apres la precedente. Le decalage
+ * est PLAFONNE — sans le `min`, la vingt-cinquieme carte attendrait plus d'une
+ * demi-seconde, et une liste qui se remplit lentement se lit comme une liste
+ * qui charge encore. `backwards` tient l'element invisible pendant son attente,
+ * faute de quoi il paraitrait d'un coup avant de s'animer. */
+.lead,
+.compteur {
+  animation: apparaitre var(--duree-apparition) var(--sortie) backwards;
+  animation-delay: calc(min(var(--rang, 0), 6) * var(--cascade));
+}
+
+/* La barre de chargement : elle ne parait que pendant une recherche, et c'est
+ * le seul element flottant du site — donc le seul qui ait le droit a une ombre,
+ * qu'il n'utilise pas. Elle sert la ou le squelette ne sert pas : quand des
+ * resultats sont deja affiches et qu'on en demande d'autres. */
+.chargement {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 1;
+  height: var(--marque);
+  background: var(--trait);
+  overflow: hidden;
+}
+
+.chargement::after {
+  content: "";
+  display: block;
+  width: 40%;
+  height: 100%;
+  background: var(--accent);
+  animation: glisser var(--boucle-chargement) var(--sortie) infinite;
+}
+
+@keyframes glisser {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(350%);
+  }
+}
+
+/* Opacite seule, sans deplacement : une liste dense qui glisse en arrivant
+ * donne l'impression que la page n'est pas posee, et le mouvement se remarque
+ * a chaque recherche. */
+@keyframes apparaitre {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes deplier {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
 }
