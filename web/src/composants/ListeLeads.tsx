@@ -32,7 +32,7 @@
 import { useState } from "react";
 
 import type { ReponseLeads } from "../api/schema";
-import { classeSegment, libelle, valeur } from "../format";
+import { classeSegment, jauge, libelle, rang, valeur } from "../format";
 import { DetailLead } from "./DetailLead";
 
 type Lead = ReponseLeads["leads"][number];
@@ -69,10 +69,12 @@ function Fiche({
   lead,
   onFiche,
   analyse,
+  index,
 }: {
   lead: Lead;
   onFiche: Props["onFiche"];
   analyse: string | undefined;
+  index: number;
 }) {
   const [ouvert, setOuvert] = useState(false);
 
@@ -85,6 +87,7 @@ function Fiche({
       className={["lead", classeSegment(lead.type_cedant), ouvert ? "ouvert" : ""]
         .filter(Boolean)
         .join(" ")}
+      style={rang(index)}
     >
       <button
         aria-expanded={ouvert}
@@ -96,6 +99,13 @@ function Fiche({
           <span className={`cellule cellule__${cle}`} key={cle}>
             <span className="cellule-clef">{libelle(cle)}</span>
             <span className="cellule-valeur">{valeur(cle, lead[cle])}</span>
+            {/* La jauge accompagne le nombre, elle ne le remplace pas : une
+                barre seule ferait estimer une valeur que l'API rend exacte.
+                Elle cite une CLEF, comme les classes de cellule — sa largeur,
+                elle, est calculee par la feuille de style. */}
+            {cle === "score" ? (
+              <span aria-hidden="true" className="jauge" style={jauge(lead.score)} />
+            ) : null}
           </span>
         ))}
       </button>
@@ -108,14 +118,20 @@ function Fiche({
       ) : null}
 
       {ouvert ? (
-        <>
-          <DetailLead lead={lead} masquees={DANS_L_ENTETE} />
-          <p className="vers-la-fiche">
-            <button className="lien" onClick={() => onFiche(lead.id)} type="button">
-              {libelle("id")} {lead.id}
-            </button>
-          </p>
-        </>
+        // L'enveloppe est de la MISE EN FORME, pas une decision : elle donne au
+        // depliage une ligne de grille a animer, faute de quoi la hauteur ne
+        // s'interpole pas. Ce qui est rendu a l'interieur, et quand, n'a pas
+        // change — voir `.lead-deplie` dans la feuille de style.
+        <div className="lead-deplie">
+          <div className="lead-deplie-contenu">
+            <DetailLead lead={lead} masquees={DANS_L_ENTETE} />
+            <p className="vers-la-fiche">
+              <button className="lien" onClick={() => onFiche(lead.id)} type="button">
+                {libelle("id")} {lead.id}
+              </button>
+            </p>
+          </div>
+        </div>
       ) : null}
     </article>
   );
@@ -124,9 +140,27 @@ function Fiche({
 export function ListeLeads({ leads, onFiche, analyses }: Props) {
   return (
     <div className="leads">
-      {leads.map((lead) => (
+      {/* La ligne de clefs, une fois pour toute la liste. Repetee sur chaque
+          carte, elle occupait autant de place que les donnees et faisait lire
+          vingt-cinq fois la meme chose.
+
+          Elle rend les MEMES clefs, dans le meme ordre, sur la meme grille :
+          une seconde liste de colonnes se serait desalignee au premier ajout.
+          Sous 800 px, la grille se replie et cette ligne disparait au profit
+          des clefs par cellule — la feuille de style bascule les deux ensemble,
+          faute de quoi une colonne se lirait sans son nom. */}
+      <div className="leads-entete">
+        {COLONNES.map((cle) => (
+          <span className={`cellule cellule__${cle}`} key={cle}>
+            {libelle(cle)}
+          </span>
+        ))}
+      </div>
+
+      {leads.map((lead, index) => (
         <Fiche
           analyse={analyses?.[lead.id]}
+          index={index}
           key={lead.id}
           lead={lead}
           onFiche={onFiche}

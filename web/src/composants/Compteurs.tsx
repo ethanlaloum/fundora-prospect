@@ -42,7 +42,7 @@
  */
 
 import type { ReponseRecherche } from "../api/schema";
-import { compte, libelle } from "../format";
+import { compte, libelle, rang } from "../format";
 
 // Les compteurs du CHEMIN DIRECT, pas ceux de la base : ce ne sont pas les
 // memes populations, donc pas les memes clefs. Le composant, lui, n'en nomme
@@ -60,9 +60,11 @@ export function Compteurs({ statistiques }: Props) {
   return (
     <section className="population">
       <ul className="compteurs">
-        {entrees.map(([cle, brute]) =>
+        {entrees.map(([cle, brute], index) =>
           typeof brute === "number" ? (
-            <li className="compteur" key={cle}>
+            // Le rang sert au decalage de la cascade, jamais a la donnee : il
+            // ordonne l'apparition des cartes, il ne decrit aucune population.
+            <li className="compteur" key={cle} style={rang(index)}>
               <span className="compteur-valeur">{compte(brute)}</span>
               <span className="compteur-clef">{libelle(cle)}</span>
             </li>

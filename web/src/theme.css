@@ -1,0 +1,207 @@
+/*
+ * Le systeme visuel : les seules valeurs de design du front.
+ *
+ * ## Pourquoi un fichier separe
+ *
+ * Une valeur ecrite en dur dans une regle est invisible : rien ne signale que
+ * `0.45rem` existe aussi ailleurs sous la forme `7px`, ni qu'une sixieme taille
+ * de texte vient de naitre. Un jeton, lui, se compte. C'est le meme
+ * raisonnement que partout ici — une valeur recopiee derive de sa source, et la
+ * seule parade est qu'il n'y ait qu'une source.
+ *
+ * **Regle : aucune longueur, aucune couleur, aucune duree n'est ecrite hors de
+ * ce fichier.** `styles.css` ne contient que des `var(--…)`. Les seules
+ * exceptions sont les valeurs sans equivalent de jeton — `0`, `100%`, `1fr`,
+ * les fractions de grille.
+ *
+ * ## Les echelles sont fermees, et nommees par leur valeur
+ *
+ * `--taille-13` plutot que `--texte-corps` : un nom semantique laisse ajouter
+ * une taille de plus sans que ca se voie, un nom chiffre rend l'ajout visible
+ * dans le fichier meme. Six tailles de texte, une grille d'espacement de 4 px,
+ * six gris, deux rayons. Si une regle a besoin d'autre chose, c'est la regle
+ * qui a tort.
+ *
+ * Ces nombres sont recopies d'en dessous, donc ils DERIVENT — c'est le defaut
+ * signature de ce projet, applique a un commentaire. Ils ont deja menti une
+ * fois : le theme sombre a fait passer les gris de cinq a six, et la marque a
+ * ajoute une sixieme taille, sans que cette phrase bouge. Les relire fait
+ * partie de toute modification du bloc ci-dessous.
+ *
+ * ## Une seule couleur d'accent, et deux couleurs d'ETAT
+ *
+ * L'accent porte l'interactif : le bouton d'action, ce qui est ouvert, ce qui
+ * est cliquable. Il ne porte PAS la hierarchie de lecture — celle-la vient de
+ * la taille et du poids, pas de la couleur. Un score important est plus gros,
+ * il n'est pas vert.
+ *
+ * Les deux couleurs d'etat sont un ecart assume au « une seule couleur ». Elles
+ * ne decorent rien :
+ *
+ * - `--etat-alerte` marque un echec de chargement, c'est-a-dire un ecran qui ne
+ *   dit pas ce qu'il pretend dire ;
+ * - `--etat-signal` marque le segment de cedant qui releve d'une base legale
+ *   distincte, et les reserves de population. Ce n'est pas un defaut du dossier,
+ *   c'est une distinction que la contrainte 4 interdit de laisser se noyer.
+ *
+ * Les deux sont desaturees : elles signalent, elles n'attirent pas.
+ *
+ * ## L'ombre n'existe que depuis qu'une chose flotte
+ *
+ * `--ombre-flottant` n'etait pas declare tant qu'aucun element ne passait
+ * au-dessus d'un autre. Il l'est depuis que l'aide de saisie flotte, et elle
+ * seule le porte. « On ne cree que ce qu'on utilise » vaut pour une variable
+ * CSS comme pour une colonne de base — une valeur que rien ne lit est morte, et
+ * aucun outil du depot ne voit les jetons CSS morts.
+ */
+
+:root {
+  /* --- Typographie ---------------------------------------------------------
+   * Une seule famille. Inter si elle est installee, la pile systeme sinon —
+   * aucun chargement distant : le front ne joint aucun domaine, et une police
+   * qui arrive en retard fait sauter la mise en page sous les yeux du lecteur.
+   */
+  --police: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    "Helvetica Neue", sans-serif;
+
+  /* La marque, et elle seule. Une chasse fixe plutot qu'une seconde famille
+   * grasse : c'est un outil qui lit des publications legales et aligne des
+   * chiffres, et le monospace le dit sans decorer. Elle est deja installee
+   * partout — aucun chargement distant, donc aucune bascule de mise en page
+   * sous les yeux du lecteur, et aucun domaine a joindre. */
+  --police-titre: ui-monospace, "SF Mono", "JetBrains Mono", "Menlo",
+    "Cascadia Mono", monospace;
+
+  --taille-12: 12px; /* clefs de champ, en-tetes de colonne */
+  --taille-13: 13px; /* valeurs, corps dense */
+  --taille-15: 15px; /* prose : le resume, le sous-titre */
+  --taille-19: 19px; /* chiffre mis en avant : score, compteur */
+  --taille-24: 24px; /* titre de section */
+  --taille-32: 32px; /* la marque, et rien d'autre */
+
+  --graisse-normale: 400;
+  --graisse-moyenne: 500;
+  --graisse-forte: 600;
+
+  --interligne-serre: 1.35;
+  --interligne: 1.55;
+
+  /* Le suivi ne sert qu'aux capitales : en dessous de 13 px, une clef en
+   * majuscules sans ouverture devient un bloc. */
+  --suivi-capitales: 0.04em;
+  --suivi-titre: -0.01em;
+
+  /* --- Gris : six niveaux, du fond a l'encre -------------------------------
+   * Les roles ci-dessous n'ajoutent aucune couleur, ils nomment un usage. Un
+   * role de plus est gratuit ; un gris de plus ne l'est pas.
+   *
+   * Il y en a SIX et non cinq, et c'est le theme sombre qui l'impose. En clair,
+   * la page et le survol pouvaient partager un gris : le blanc des cartes les
+   * separait. En sombre, quatre plans doivent se distinguer sans blanc — la
+   * page, la carte posee dessus, la ligne survolee, et le trait qui les borde.
+   * Les confondre fait disparaitre soit les bordures, soit le survol. */
+  --gris-0: #0b0b0e; /* la page */
+  --gris-1: #131318; /* les cartes, posees dessus */
+  --gris-2: #1c1c23; /* le survol, un cran au-dessus */
+  --gris-3: #2b2b34; /* les traits */
+  --gris-4: #9494a0; /* le texte secondaire */
+  --gris-5: #ececf1; /* l'encre */
+
+  --surface: var(--gris-1); /* les cartes */
+  --fond: var(--gris-0); /* la page, et les zones en retrait dans une carte */
+  --survol: var(--gris-2); /* le fond d'une ligne survolee, dans une carte */
+  --trait: var(--gris-3); /* toute bordure structurelle, 1 px */
+  --encre-douce: var(--gris-4); /* clefs, unites, texte secondaire */
+  --encre: var(--gris-5); /* tout le reste */
+
+  /* --- L'accent, et les deux etats ---------------------------------------- */
+  /* Sur fond sombre, le contraste seul ne suffit plus a designer l'action :
+   * tout est deja contraste. L'accent redevient donc une teinte — une seule,
+   * lumineuse, posee sur ce qui repond au clic et sur rien d'autre. Le score,
+   * lui, reste en encre : la hierarchie de lecture ne passe pas par la
+   * couleur. */
+  --accent: #34e2b8;
+  --accent-contraste: #06231d;
+
+  --etat-alerte: #ef7566;
+  --etat-signal: #e2a83f;
+  /* La teinte du signal, pour un fond de zone. Ce n'est pas une sixieme
+   * couleur : c'est la meme, posee tres bas, la ou un aplat gris ne
+   * distinguerait pas la zone du reste de la carte. */
+  --etat-signal-fond: #1d1810;
+
+  /* --- Longueurs : grille de 4 px ------------------------------------------
+   * Rien entre deux pas. Les largeurs de colonne de la liste sont sur la meme
+   * grille — un alignement a 7 px se voit, meme quand personne ne saurait dire
+   * quoi. */
+  --pas-4: 4px;
+  --pas-8: 8px;
+  --pas-12: 12px;
+  --pas-16: 16px;
+  --pas-24: 24px;
+  --pas-32: 32px;
+  --pas-48: 48px;
+
+  --bordure: 1px;
+  /* La marque d'un segment n'est pas une bordure structurelle : elle porte une
+   * distinction, donc elle a le droit d'etre vue. */
+  --marque: 2px;
+
+  --rayon-carte: 6px;
+  --rayon-bouton: 4px;
+
+  /* L'ombre existe maintenant, et une seule chose la porte : l'aide de saisie,
+   * qui passe au-dessus de la page au lieu de la pousser. Elle n'etait pas
+   * declaree tant que rien ne flottait — « on ne cree que ce qu'on utilise »,
+   * et aucun outil du depot ne voit un jeton CSS mort. */
+  --ombre-flottant: 0 8px 24px rgb(0 0 0 / 45%);
+
+  --largeur-page: 1120px;
+
+  /* --- Mouvement -----------------------------------------------------------
+   * Quatre durees, aucune au-dessus de 200 ms, une seule courbe. Une animation
+   * qu'on remarque est trop longue : ici elle sert a lier un etat au suivant,
+   * pas a etre regardee. */
+  --duree-survol: 120ms;
+  --duree-apparition: 150ms;
+  --duree-depliage: 180ms;
+  --sortie: cubic-bezier(0, 0, 0.2, 1);
+
+  /* Le pas entre deux lignes qui apparaissent. Ce n'est pas une duree
+   * d'animation mais un DECALAGE : chaque ligne dure toujours
+   * `--duree-apparition`, elle commence simplement un cran plus tard. Le
+   * decalage est plafonne dans la regle, faute de quoi la vingt-cinquieme ligne
+   * attendrait une demi-seconde pour rien. */
+  --cascade: 24ms;
+
+  /* Une BOUCLE, pas une revelation — d'ou le prefixe distinct. Un indicateur
+   * indetermine doit tourner assez lentement pour se lire, ce qui le met par
+   * nature au-dessus du plafond de 200 ms. Le verrou connait la distinction et
+   * n'applique le plafond qu'aux `--duree-*` ; il exige en revanche que
+   * celui-ci s'arrete aussi sous `prefers-reduced-motion`, ou une boucle
+   * perpetuelle serait le pire cas. */
+  --boucle-chargement: 1200ms;
+}
+
+/* Le reglage systeme fait foi. Les jetons tombent a zero — donc tout ce qui
+ * passe par eux s'arrete — et la regle generale rattrape ce qui aurait echappe
+ * aux jetons. Les deux, parce qu'un jeton oublie ne doit pas rouvrir une
+ * animation a quelqu'un qui a demande qu'il n'y en ait pas. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duree-survol: 0ms;
+    --duree-apparition: 0ms;
+    --duree-depliage: 0ms;
+    --cascade: 0ms;
+    --boucle-chargement: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}

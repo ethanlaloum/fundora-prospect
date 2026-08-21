@@ -51,6 +51,7 @@ import { FicheEvenement } from "./composants/FicheEvenement";
 import { Filtres } from "./composants/Filtres";
 import { ListeLeads } from "./composants/ListeLeads";
 import { ListeSorties } from "./composants/ListeSorties";
+import { Squelette } from "./composants/Squelette";
 import { presenterAnalyse } from "./comparatif";
 import { libelle, valeur } from "./format";
 
@@ -76,10 +77,14 @@ function Requete({ reponse }: { reponse: ReponseRecherche["outil"] }) {
 }
 
 export function App() {
-  const [filtres, setFiltres] = useState<Valeurs>(FILTRES_VIDES);
+  // `null` tant que RIEN n'a ete demande — et c'est la difference entre « pas
+  // de resultat » et « pas encore de recherche ». Les filtres saisis, eux,
+  // vivent dans le formulaire : les garder ici ferait repartir une requete a
+  // chaque frappe.
+  const [demande, setDemande] = useState<Valeurs | null>(null);
   const [reponse, setReponse] = useState<ReponseRecherche | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
-  const [chargement, setChargement] = useState(true);
+  const [chargement, setChargement] = useState(false);
 
   const [ficheOuverte, setFicheOuverte] = useState<string | null>(null);
   const [fiche, setFiche] = useState<ReponseEvenement | null>(null);
@@ -95,12 +100,19 @@ export function App() {
   const [erreurSorties, setErreurSorties] = useState<string | null>(null);
 
   useEffect(() => {
+    // Aucune recherche au chargement. Celle-ci passe par le modele puis par le
+    // BODACC : la lancer sans qu'on l'ait demandee ferait payer des tokens et
+    // une attente a qui ouvre la page pour la regarder. Et surtout, l'ecran
+    // afficherait alors des chiffres portant sur une population que personne
+    // n'a choisie — ce que le lecteur lirait comme SA recherche.
+    if (demande === null) return;
+
     // `abandonne` evite qu'une reponse lente ecrase une reponse rapide partie
     // apres elle : l'ecran afficherait alors des chiffres qui ne correspondent
     // plus aux filtres visibles, ce qui se lit comme un resultat.
     let abandonne = false;
     setChargement(true);
-    lireRecherche(filtres)
+    lireRecherche(demande)
       .then((recue) => {
         if (abandonne) return;
         setReponse(recue);
@@ -117,7 +129,7 @@ export function App() {
     return () => {
       abandonne = true;
     };
-  }, [filtres]);
+  }, [demande]);
 
   useEffect(() => {
     if (ficheOuverte === null) {
@@ -179,8 +191,22 @@ export function App() {
 
   return (
     <main className="page">
+      {/* La barre sert la ou le squelette ne sert pas : quand des resultats
+          sont deja a l'ecran et qu'on en demande d'autres. Sans elle, le seul
+          signe qu'une recherche tourne est le bouton grise — et cette
+          recherche-la passe par le modele puis par le BODACC, donc elle dure.
+          `aria-hidden` : l'etat est deja porte par le bouton, l'annoncer deux
+          fois n'apprend rien a personne. */}
+      {chargement ? <div aria-hidden="true" className="chargement" /> : null}
+
       <header className="entete">
-        <h1>fundora-prospect</h1>
+        {/* Le nom du depot n'est pas un nom de produit : « fundora-prospect »
+            se lit comme un chemin de fichier. Celui-ci dit ce que l'outil
+            fait — reperer un signal dans les publications legales — et
+            l'accent separe les deux moities au lieu de decorer. */}
+        <h1>
+          Signal<span className="marque-suite">/BODACC</span>
+        </h1>
         <p className="sous-titre">
           Cessions de fonds de commerce publiees au BODACC. Le prospect est la
           societe cedante, celle qui encaisse.
@@ -190,8 +216,8 @@ export function App() {
       <Filtres
         aides={aides}
         chargement={chargement}
-        onValider={setFiltres}
-        valeurs={filtres}
+        onValider={setDemande}
+        valeurs={FILTRES_VIDES}
       />
 
       {erreur ? <p className="erreur">{erreur}</p> : null}
@@ -200,8 +226,25 @@ export function App() {
         <FicheEvenement onFermer={() => setFicheOuverte(null)} reponse={fiche} />
       ) : null}
 
+      {/* Le squelette ne remplace jamais des resultats affiches : il ne parait
+          que la ou l'ecran serait vide, c'est-a-dire au tout premier
+          chargement. Une recherche relancee garde le resume et les compteurs
+          precedents — les remplacer par des blocs gris ferait disparaitre ce
+          qui permet de comprendre ce qu'on regarde. */}
+      {chargement && !reponse && !erreur ? <Squelette /> : null}
+
+      {/* Ni resultat, ni erreur, ni recherche en cours : on n'a encore rien
+          demande. L'ecran le dit au lieu de rester vide — un vide se lit aussi
+          bien comme une panne que comme une attente. Aucun chiffre n'y figure,
+          pas meme un zero : il se lirait comme un resultat. */}
+      {demande === null && !chargement ? (
+        <p className="avant-recherche">
+          Renseignez les filtres, puis lancez la recherche.
+        </p>
+      ) : null}
+
       {reponse ? (
-        <>
+        <div className="resultats">
           <p className="resume">{reponse.outil.resume}</p>
           <Requete reponse={reponse.outil} />
           <Compteurs statistiques={reponse.outil.statistiques} />
@@ -234,11 +277,18 @@ export function App() {
               </>
             );
           })()}
-        </>
+        </div>
       ) : null}
 
-      {erreurSorties ? <p className="erreur">{erreurSorties}</p> : null}
-      {sorties ? (
+      {/* Le journal ne depend pas des filtres — une sortie du flux est un fait
+          date sur un cedant, pas une population. Il n'apparait pourtant qu'une
+          fois une recherche lancee : a l'arrivee, l'ecran ne montre AUCUN
+          chiffre, pas meme ceux d'une section independante. Un « 0 » affiche
+          avant qu'on ait rien demande se lit comme un resultat. */}
+      {erreurSorties && demande !== null ? (
+        <p className="erreur">{erreurSorties}</p>
+      ) : null}
+      {sorties && demande !== null ? (
         <ListeSorties depuis={depuis} onDepuis={setDepuis} reponse={sorties} />
       ) : null}
     </main>
